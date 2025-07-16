@@ -1,24 +1,25 @@
 // @ts-check
+// noinspection UnnecessaryLocalVariableJS
 
 let DEBUG_MODE = false;
 /**
  * A coordinate on the grid, identified by its row and column.
- * @typedef {{row: number, col: number}} Coord 
+ * @typedef {{row: number, col: number}} Coord
  *  */
 
 /**
  * Rectangle drawn on the canvas
- * @typedef {{x: number, y: number, width: number, height: number}} Rectangle 
+ * @typedef {{x: number, y: number, width: number, height: number}} Rectangle
  *  */
 
 /**
- * A hallway, connecting rooms together. Hallways are not neccessary present in a room, in this case they are not enabled.
- * Otherwise, depending on what's on the _other side_, their status can differ. 
+ * A hallway, connecting rooms. Hallways are not necessarily present in a room, in this case they are not enabled.
+ * Otherwise, depending on what's on the _other side_, their status can differ.
  * @typedef {{status: "unknown" | "open" | "blocked", enabled: boolean }} Hallway
  *  */
 
 /**
- * Direction of movement on the grid.
+ * Direction of movement on the grid
  * @typedef {"UP"|"DOWN"|"LEFT"|"RIGHT"} Direction
  */
 
@@ -28,98 +29,100 @@ let DEBUG_MODE = false;
  */
 /**
  * What can be found in a room
- * @typedef {"keys"|"gems"} Item
+ * @typedef {"keys"|"gems"|"steps"} Item
  */
 
 /** @type {Record<Item, string>} */
 const ItemTexts = {
     "keys": "🔑",
     "gems": "💎",
+    "steps": "👣",
 };
 
 /**
- * A room effect, which can trigger when the player enters it.
- * Some rooms trigger _each time_, some only once. 
+ * A room effect, which can trigger when the player enters or leaves it, or "uses" the room.
+ * Some can trigger on each invocation, some only once. These are bound to the effects, not the rooms.
  * @typedef {{ invoke: () => void, description: string, triggerText: string, triggerLimit: number, rarity: number }} Effect
  *  */
 /** @type {Record<string, Effect>} */
 const Effects = {
     "extraSteps":
-    {
-        invoke: () => gameState.steps += 2,
-        description: "Take a rest.",
-        triggerText: "You have gained 2 extra steps.",
-        triggerLimit: -1,
-        rarity: 0.5,
-    },
+        {
+            invoke: () => gameState.steps += 2,
+            description: "Take a rest.",
+            triggerText: "You have gained 2 extra steps.",
+            triggerLimit: -1,
+            rarity: 0.5,
+        },
     "extraKey":
-    {
-        invoke: () => addInventoryItem("keys"),
-        description: "Alohomora.",
-        triggerText: "You have found a key.",
-        triggerLimit: 1,
-        rarity: 0.3,
-    },
+        {
+            invoke: () => addInventoryItem("keys"),
+            description: "Alohomora.",
+            triggerText: "You have found a key.",
+            triggerLimit: 1,
+            rarity: 0.3,
+        },
     "money":
-    {
-        invoke: () => addInventoryItem("gems"),
-        description: "What's that spark in the corner?",
-        triggerText: "You have found a gem.",
-        triggerLimit: 1,
-        rarity: 0.3,
-    },
+        {
+            invoke: () => addInventoryItem("gems"),
+            description: "What's that spark in the corner?",
+            triggerText: "You have found a gem.",
+            triggerLimit: 1,
+            rarity: 0.3,
+        },
     "taxes":
-    {
-        invoke: () => removeInventoryItem("gems"),
-        description: "Takes a toll on you.",
-        triggerText: `You have to pay taxes: ${ItemTexts.gems}`,
-        triggerLimit: -1,
-        rarity: 0.3,
-    },
+        {
+            invoke: () => removeInventoryItem("gems"),
+            description: "Takes a toll on you.",
+            triggerText: `You have to pay taxes: ${ItemTexts.gems}`,
+            triggerLimit: -1,
+            rarity: 0.3,
+        },
     "garden":
-    {
-        invoke: () => gameState.steps = 41,
-        description: "Like starting again.",
-        triggerText: "Your steps have been reset.",
-        triggerLimit: -1,
-        rarity: 0.4,
-    },
+        {
+            invoke: () => gameState.steps = 41,
+            description: "Like starting again.",
+            triggerText: "Your steps have been reset.",
+            triggerLimit: -1,
+            rarity: 0.4,
+        },
     "shop":
-    {
-        invoke: () => {
-            if (getInventoryItemCount("gems") >= 5) {
-                addInventoryItem("keys");
-                removeInventoryItem("gems", 5);
-            }
+        {
+            invoke: () => {
+                if (getInventoryItemCount("gems") >= 5) {
+                    addInventoryItem("keys");
+                    removeInventoryItem("gems", 5);
+                }
+            },
+            description: "Buy your passage.",
+            triggerText: "You can buy a key for #5 with [Space].",
+            triggerLimit: 1,
+            rarity: 0.9,
         },
-        description: "Buy your passage.",
-        triggerText: "You can buy a key for #5 with [Space].",
-        triggerLimit: 1,
-        rarity: 0.9,
-    },
     "exit":
-    {
-        invoke: () => {
-            gameState.isRunning = false;
+        {
+            invoke: () => {
+                gameState.isRunning = false;
+            },
+            description: "",
+            triggerText: "You have won!",
+            triggerLimit: -1,
+            rarity: 0,
         },
-        description: "",
-        triggerText: "You have won!",
-        triggerLimit: -1,
-        rarity: 0,
-    },
     "noop":
-    {
-        invoke: () => { },
-        description: "A simple room.",
-        triggerText: "",
-        triggerLimit: -1,
-        rarity: 0.7,
-    },
+        {
+            invoke: () => {
+            },
+            description: "A simple room.",
+            triggerText: "",
+            triggerLimit: -1,
+            rarity: 0.7,
+        },
 };
 
 class Tween {
     /**
-     * 
+     *
      * @param {{
      * from: number,
      * to: number,
@@ -130,9 +133,9 @@ class Tween {
      * loop: boolean,
      * reverse: boolean,
      * type: string
-     * }} values 
+     * }} values
      */
-    constructor({ from, to, duration, ease = t => t, onUpdate, onComplete, loop = false, reverse = false, type }) {
+    constructor({from, to, duration, ease = t => t, onUpdate, onComplete, loop = false, reverse = false, type}) {
         this.from = from;
         this.to = to;
         this.duration = duration;
@@ -147,8 +150,8 @@ class Tween {
     }
 
     /**
-     * 
-     * @param {number} time 
+     *
+     * @param {number} time
      */
     update(time) {
         const t = Math.min((time - this.startTime) / this.duration, 1);
@@ -170,7 +173,7 @@ class Tween {
             }
         }
     }
-};
+}
 
 /**
  * @type {Tween[]}
@@ -232,10 +235,10 @@ class Room {
             "use": "noop",
         }
         this.hallways = {
-            UP: { status: "unknown", enabled: true },
-            DOWN: { status: "unknown", enabled: true },
-            LEFT: { status: "unknown", enabled: true },
-            RIGHT: { status: "unknown", enabled: true },
+            UP: {status: "unknown", enabled: true},
+            DOWN: {status: "unknown", enabled: true},
+            LEFT: {status: "unknown", enabled: true},
+            RIGHT: {status: "unknown", enabled: true},
         };
         this.revealed = false;
         this.triggerCount = 0;
@@ -247,17 +250,23 @@ class Room {
     /** @param {string} event */
     #invokeEvent(event) {
         if (Effects[event].triggerLimit === -1) {
+            // the event has no limitation on its invocation
             Effects[event].invoke();
             gameState.lastEffect = Effects[event].triggerText;
         } else if (this.triggerCount < Effects[event].triggerLimit) {
+            // the event does have limitation on its invocation, but the player has not yet exhausted it
             Effects[event].invoke();
             gameState.lastEffect = Effects[event].triggerText;
             this.triggerCount += 1;
         } else {
+            // Effect limitation exhausted
             gameState.lastEffect = "";
         }
     }
 
+    /**
+     * Called when the player enters the room.
+     */
     enter() {
         this.#invokeEvent(this.events.enter);
     }
@@ -271,7 +280,7 @@ class Room {
     }
 
     /**
-     * 
+     *
      * @returns {Room} copy of this
      */
     copy() {
@@ -442,10 +451,10 @@ const CSS_COLOR_NAMES = {
 };
 
 /**
- * 
- * @param {number} value 
- * @param {number} lower 
- * @param {number} upper 
+ *
+ * @param {number} value
+ * @param {number} lower
+ * @param {number} upper
  * @returns {number} the clamped value
  */
 const clamp = (value, lower, upper) => value < lower ? lower : value > upper ? upper : value;
@@ -453,22 +462,22 @@ const clamp = (value, lower, upper) => value < lower ? lower : value > upper ? u
 const sleep = (duration = 1000) => new Promise(r => setTimeout(r, duration));
 
 const DIRECTIONS = {
-    UP: { row: -1, col: 0 },
-    DOWN: { row: 1, col: 0 },
-    LEFT: { row: 0, col: -1 },
-    RIGHT: { row: 0, col: 1 },
-    NONE: { row: 0, col: 0 },
+    UP: {row: -1, col: 0},
+    DOWN: {row: 1, col: 0},
+    LEFT: {row: 0, col: -1},
+    RIGHT: {row: 0, col: 1},
+    NONE: {row: 0, col: 0},
 };
 
 const ROOM_COLORS = {
-    "noop": CSS_COLOR_NAMES.DarkOrange,
-    "taxes": CSS_COLOR_NAMES.Tomato,
-    "garden": CSS_COLOR_NAMES.LimeGreen,
+    "noop": "#AF6C31",
+    "taxes": "#AE0000",
+    "garden": "#2F8043",
+    "shop": "#D7DE87",
+    "extraSteps": "#6E5381",
     "money": CSS_COLOR_NAMES.Tan,
     "extraKey": CSS_COLOR_NAMES.Gold,
-    "extraSteps": CSS_COLOR_NAMES.Orchid,
-    "shop": CSS_COLOR_NAMES.MediumVioletRed,
-    "exit": CSS_COLOR_NAMES.SlateBlue,
+    "exit": "#005A8D",
     "draft": CSS_COLOR_NAMES.LightSteelBlue,
 };
 
@@ -482,9 +491,9 @@ const gameState = {
     /** @type {number} */
     cols: 10,
     /** @type {Coord} */
-    player: { row: 2, col: 0 },
+    player: {row: 2, col: 0},
     /** @type {Coord} */
-    exit: { row: 2, col: 9 },
+    exit: {row: 2, col: 9},
     /** @type {boolean} */
     isRunning: true,
     /** @type {number} */
@@ -507,6 +516,7 @@ const gameState = {
     inventory: {
         keys: 0,
         gems: 0,
+        steps: 0,
     },
     /** @type {number} */
     lastTimeStamp: 0,
@@ -515,21 +525,21 @@ const gameState = {
 /** @param {Coord} coord */
 const valid = (coord) => coord.row >= 0 && coord.row < gameState.rows && coord.col >= 0 && coord.col < gameState.cols;
 
-/** 
+/**
  * @param {Coord} coord
- * @return {Room} 
+ * @return {Room}
  * */
 const at = (coord) => gameState.grid[coord.row][coord.col];
 
 /** @param {Coord} coord */
 const hidden = (coord) => valid(coord) && !at(coord).revealed;
 
-/** 
+/**
  * @param {Coord} x
  * @param {Coord} y
- * @return {Coord} 
+ * @return {Coord}
  * */
-const add = (x, y) => ({ row: x.row + y.row, col: x.col + y.col });
+const add = (x, y) => ({row: x.row + y.row, col: x.col + y.col});
 
 const randomRoomPurpose = () => {
     const effects = Object.values(Effects);
@@ -543,7 +553,7 @@ const randomRoomPurpose = () => {
     throw new Error();
 };
 
-/** 
+/**
  *  @param {Direction} direction
  * @returns {Direction}
  *  */
@@ -556,12 +566,12 @@ const opposite = (direction) => {
 }
 
 const newGame = () => {
-    gameState.grid = Array.from({ length: gameState.rows },
-        (_, row) => Array.from({ length: gameState.cols },
-            (_, col) => (new Room()))
+    gameState.grid = Array.from({length: gameState.rows},
+        () => Array.from({length: gameState.cols},
+            () => (new Room()))
     );
 
-    gameState.player = { row: 2, col: 0 };
+    gameState.player = {row: 2, col: 0};
     at(gameState.player).events = {
         enter: "noop",
         exit: "noop",
@@ -569,12 +579,12 @@ const newGame = () => {
     };
     at(gameState.player).revealed = true;
     at(gameState.player).hallways = {
-        UP: { status: "unknown", enabled: true },
-        DOWN: { status: "unknown", enabled: true },
-        RIGHT: { status: "unknown", enabled: true },
-        LEFT: { status: "blocked", enabled: true },
+        UP: {status: "unknown", enabled: true},
+        DOWN: {status: "unknown", enabled: true},
+        RIGHT: {status: "unknown", enabled: true},
+        LEFT: {status: "blocked", enabled: true},
     };
-    gameState.exit = { row: 2, col: 9 };
+    gameState.exit = {row: 2, col: 9};
     at(gameState.exit).events = {
         enter: "exit",
         exit: "noop",
@@ -582,10 +592,10 @@ const newGame = () => {
     };
     at(gameState.exit).revealed = true;
     at(gameState.exit).hallways = {
-        UP: { status: "unknown", enabled: true },
-        DOWN: { status: "unknown", enabled: true },
-        RIGHT: { status: "blocked", enabled: true },
-        LEFT: { status: "unknown", enabled: true },
+        UP: {status: "unknown", enabled: true},
+        DOWN: {status: "unknown", enabled: true},
+        RIGHT: {status: "blocked", enabled: true},
+        LEFT: {status: "unknown", enabled: true},
     };
     gameState.isRunning = true;
     gameState.steps = 40;
@@ -608,17 +618,18 @@ const newGame = () => {
     gameState.inventory = {
         "keys": 1,
         "gems": 0,
+        "steps": 0,
     };
 };
 
 /**
- * Retrieves the amount of the selected item in the player inventory. 
+ * Retrieves the amount of the selected item in the player inventory.
  *  @param {Item} item
  *  */
 const getInventoryItemCount = (item) => gameState.inventory[item] ?? 0;
 
 /**
- * Adds the selected item to the player inventory. 
+ * Adds the selected item to the player inventory.
  *  @param {Item} item
  *  @param {number} amount
  *  */
@@ -630,7 +641,7 @@ const addInventoryItem = (item, amount = 1) => {
 }
 
 /**
- * Adds the selected item to the player inventory. 
+ * Adds the selected item to the player inventory.
  *  @param {Item} item
  *  @param {number} amount
  *  */
@@ -657,8 +668,7 @@ const generateHallway = (position, direction, draftRoom) => {
             if (hidden(neighborPos)) {
                 draftRoom.hallways[direction].enabled = true;
                 draftRoom.hallways[direction].status = "unknown";
-            }
-            else if (neighbor.hallways[opposite(direction)].enabled) {
+            } else if (neighbor.hallways[opposite(direction)].enabled) {
                 draftRoom.hallways[direction].enabled = true;
                 draftRoom.hallways[direction].status = "open";
             } else {
@@ -719,8 +729,8 @@ const refreshDrafts = () => {
 
 let playerAnimationIsPlaying = false;
 /**
- *  @param {Direction} direction* 
-*/
+ *  @param {Direction} direction
+ */
 const updatePlayerPosition = (direction) => {
     if (!gameState.isRunning) return;
 
@@ -735,8 +745,7 @@ const updatePlayerPosition = (direction) => {
             gameState.currentState = "draft";
             refreshDrafts();
             return;
-        }
-        else if (at(newPosition).hallways[opposite(direction)].enabled) {
+        } else if (at(newPosition).hallways[opposite(direction)].enabled) {
             at(newPosition).enter();
             gameState.player = newPosition;
             gameState.steps -= 1;
@@ -784,16 +793,16 @@ const update = (delta) => {
 };
 
 /**
- * 
- * @param {number} from 
- * @param {number} to 
- * @param {number} duration 
- * @param {(value: number) => void} onUpdate 
- * @param {object} options 
+ *
+ * @param {number} from
+ * @param {number} to
+ * @param {number} duration
+ * @param {(value: number) => void} onUpdate
+ * @param {object} options
  */
 const tweenLerp = (from, to, duration, onUpdate, options = {}) => {
     //@ts-ignore
-    animations.push(new Tween({ from, to, duration, onUpdate, ...options }));
+    animations.push(new Tween({from, to, duration, onUpdate, ...options}));
 };
 
 const fadeIn = (duration, onUpdate, options = {}) => {
@@ -805,18 +814,18 @@ const fadeOut = (duration, onUpdate, options = {}) => {
 };
 
 const pulse = (from, to, duration, onUpdate, options = {}) => {
-    tweenLerp(from, to, duration, onUpdate, { ...options, loop: true, reverse: true });
+    tweenLerp(from, to, duration, onUpdate, {...options, loop: true, reverse: true});
 };
 
 const rotateSpin = (startAngle, endAngle, duration, onUpdate, loop = false, options = {}) => {
-    tweenLerp(startAngle, endAngle, duration, onUpdate, { ...options, loop });
+    tweenLerp(startAngle, endAngle, duration, onUpdate, {...options, loop});
 };
 
 /**
- * 
- * @param {Hallway} hallway 
+ *
+ * @param {Hallway} hallway
  * @param {number} midX
- * @param {number} midY 
+ * @param {number} midY
  * @param {number} unitWidth
  * @param {number} unitHeight
  * @param {"UP" | "DOWN" | "RIGHT" | "LEFT"} direction
@@ -834,46 +843,42 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
         },
         "unknown": {
             factor: 3,
-            color: CSS_COLOR_NAMES.LightSlateGray,
+            color: "#e6e6e6",
         }
     }
     const factor = options[hallway.status].factor;
+    context.fillStyle = options[hallway.status].color;
 
-    context.lineWidth = Math.max(10, Math.floor(unitWidth / 10));
-    context.strokeStyle = options[hallway.status].color;
+    context.lineWidth = 1;
+    context.strokeStyle = "black";
+
+    const lineWidth = Math.max(10, Math.floor(unitWidth / 10));
+    const lineHeight = Math.max(10, Math.floor(unitHeight / 10));
 
     if (direction === "UP") {
-        context.beginPath();
-        context.moveTo(midX, midY);
-        context.lineTo(midX, midY - unitHeight / factor);
-        context.stroke();
+        context.strokeRect(midX - lineWidth / 2, midY - unitHeight / factor, lineWidth, unitHeight / factor);
+        context.fillRect(midX - lineWidth / 2, midY - unitHeight / factor, lineWidth, unitHeight / factor);
     }
     if (direction === "DOWN") {
-        context.beginPath();
-        context.moveTo(midX, midY);
-        context.lineTo(midX, midY + unitHeight / factor);
-        context.stroke();
+        context.strokeRect(midX - lineWidth / 2, midY, lineWidth, unitHeight / factor);
+        context.fillRect(midX - lineWidth / 2, midY, lineWidth, unitHeight / factor);
     }
     if (direction === "RIGHT") {
-        context.beginPath();
-        context.moveTo(midX, midY);
-        context.lineTo(midX + unitWidth / factor, midY);
-        context.stroke();
+        context.strokeRect(midX, midY - lineHeight / 2, unitWidth / factor, lineHeight);
+        context.fillRect(midX, midY - lineHeight / 2, unitWidth / factor, lineHeight);
     }
     if (direction === "LEFT") {
-        context.beginPath();
-        context.moveTo(midX, midY);
-        context.lineTo(midX - unitWidth / factor, midY);
-        context.stroke();
+        context.strokeRect(midX - unitWidth / factor, midY - lineHeight / 2, unitWidth / factor, lineHeight);
+        context.fillRect(midX - unitWidth / factor, midY - lineHeight / 2, unitWidth / factor, lineHeight);
     }
 };
 
 /**
- * 
- * @param {Coord} coord 
+ *
+ * @param {Coord} coord
  * @param {number} unitWidth
  * @param {number} unitHeight
- * @param {Room} room 
+ * @param {Room} room
  */
 const renderRoom = (coord, unitWidth, unitHeight, room) => {
     if (!room.revealed) return;
@@ -885,32 +890,14 @@ const renderRoom = (coord, unitWidth, unitHeight, room) => {
     context.fillStyle = ROOM_COLORS[room.events.enter];
     context.fillRect(roomX, roomY, unitWidth, unitHeight);
 
+
     const midX = roomX + unitWidth / 2;
     const midY = roomY + unitHeight / 2;
-    const GRID_BORDER_COLOR = "#CECECE";
-    const dropOff = 0.8;
-    // Horizontal gradient
-    const horizontalGrad = context.createLinearGradient(roomX, 0, roomX + unitWidth, 0);
-    horizontalGrad.addColorStop(0, ROOM_COLORS[room.events.enter]);
-    horizontalGrad.addColorStop(dropOff, ROOM_COLORS[room.events.enter]);
-    horizontalGrad.addColorStop(1, GRID_BORDER_COLOR);
 
-    // Vertical gradient
-    const verticalGrad = context.createLinearGradient(0, roomY, 0, roomY + unitHeight);
-    verticalGrad.addColorStop(0, ROOM_COLORS[room.events.enter]);
-    verticalGrad.addColorStop(dropOff, ROOM_COLORS[room.events.enter]);
-    verticalGrad.addColorStop(1, GRID_BORDER_COLOR);
-
-    // Blend both gradients
-    context.globalAlpha = 0.3; // soften the overlay
-
-    // Apply horizontal gradient pass
-    context.fillStyle = horizontalGrad;
-    context.fillRect(roomX, roomY, unitWidth, unitHeight);
-
-    // Apply vertical gradient pass
-    context.fillStyle = verticalGrad;
-    context.fillRect(roomX, roomY, unitWidth, unitHeight);
+    context.beginPath();
+    context.arc(midX, midY, 14.5, 0, Math.PI * 2);
+    context.fillStyle = "black";
+    context.fill();
 
     context.globalAlpha = 1; // reset
     renderHallway(hallways.UP, midX, midY, unitWidth, unitHeight, "UP");
@@ -919,30 +906,30 @@ const renderRoom = (coord, unitWidth, unitHeight, room) => {
     renderHallway(hallways.RIGHT, midX, midY, unitWidth, unitHeight, "RIGHT");
 
     context.beginPath();
-    context.arc(midX, midY, 15, 0, Math.PI * 2);
+    context.arc(midX, midY, 14, 0, Math.PI * 2);
     context.fillStyle = CSS_COLOR_NAMES.Lavender;
     context.fill();
 };
 
 
 /**
- * 
- * @param {number} centerX 
- * @param {number} centerY 
- * @param {number} radius 
+ *
+ * @param {number} centerX
+ * @param {number} centerY
+ * @param {number} radius
  */
 const drawRefreshArrow = (centerX, centerY, radius = 50) => {
     const length = radius / 2;
     const items = [{
         startAngle: Math.PI * 0.4,
-        endAngle: Math.PI * 1,
+        endAngle: Math.PI,
         sign: -1,
     },
-    {
-        startAngle: Math.PI * 1.4,
-        endAngle: Math.PI * 2,
-        sign: 1,
-    }];
+        {
+            startAngle: Math.PI * 1.4,
+            endAngle: Math.PI * 2,
+            sign: 1,
+        }];
     for (const item of items) {
         const startAngle = refreshRotation + item.startAngle;
         const endAngle = refreshRotation + item.endAngle;
@@ -977,10 +964,10 @@ const drawRefreshArrow = (centerX, centerY, radius = 50) => {
 
 
 /**
- * 
- * @param {string} label 
- * @param {number} centerX 
- * @param {number} centerY 
+ *
+ * @param {string} label
+ * @param {number} centerX
+ * @param {number} centerY
  */
 const drawKeyLabel = (label, centerX, centerY) => {
     const paddingX = 8;
@@ -1008,10 +995,10 @@ const drawKeyLabel = (label, centerX, centerY) => {
 }
 
 /**
- * 
+ *
  * @param {Rectangle} zone
  * @param {(width: number, height: number) => void} callback
-*/
+ */
 const renderInLayout = (zone, callback) => {
     context.save();
     context.translate(zone.x, zone.y);
@@ -1020,8 +1007,8 @@ const renderInLayout = (zone, callback) => {
 }
 
 /**
- * 
- * @param {number} width 
+ *
+ * @param {number} width
  * @param {number} height
  */
 const renderGoal = (width, height) => {
@@ -1035,8 +1022,8 @@ const renderGoal = (width, height) => {
 };
 
 /**
- * 
- * @param {number} width 
+ *
+ * @param {number} width
  * @param {number} height
  */
 const renderInventory = (width, height) => {
@@ -1059,8 +1046,8 @@ const renderInventory = (width, height) => {
 };
 
 /**
- * 
- * @param {number} width 
+ *
+ * @param {number} width
  * @param {number} height
  */
 const renderPlayer = (width, height) => {
@@ -1072,14 +1059,14 @@ const renderPlayer = (width, height) => {
     const playerY = gameState.player.row * unitHeight;
 
     context.beginPath();
-    context.arc(playerX + unitWidth / 2, playerY + unitHeight / 2, 15, 0, Math.PI * 2);
+    context.arc(playerX + unitWidth / 2, playerY + unitHeight / 2, 10, 0, Math.PI * 2);
     context.fillStyle = PLAYER_COLOR;
     context.fill();
 };
 
 /**
- * 
- * @param {number} width 
+ *
+ * @param {number} width
  * @param {number} height
  */
 const renderGrid = (width, height) => {
@@ -1090,28 +1077,31 @@ const renderGrid = (width, height) => {
 
     const cols = gameState.cols;
     // Vertical lines
-    for (let col = 0; col <= cols; ++col) {
-        const x = col * unitWidth;
-        context.beginPath();
-        context.moveTo(x, 0);
-        context.lineTo(x, height);
-        context.stroke();
+    if (DEBUG_MODE) {
+        for (let col = 0; col <= cols; ++col) {
+            const x = col * unitWidth;
+            context.beginPath();
+            context.moveTo(x, 0);
+            context.lineTo(x, height);
+            context.stroke();
+        }
     }
-
     const rows = gameState.rows;
     // Horizontal lines
-    for (let row = 0; row <= rows; ++row) {
-        const y = row * unitHeight;
-        context.beginPath();
-        context.moveTo(0, y);
-        context.lineTo(width, y);
-        context.stroke();
+    if (DEBUG_MODE) {
+        for (let row = 0; row <= rows; ++row) {
+            const y = row * unitHeight;
+            context.beginPath();
+            context.moveTo(0, y);
+            context.lineTo(width, y);
+            context.stroke();
+        }
     }
 
     // rooms
     for (let row = 0; row < gameState.rows; ++row) {
         for (let col = 0; col < gameState.cols; ++col) {
-            const coord = { row: row, col: col };
+            const coord = {row: row, col: col};
             renderRoom(coord, unitWidth, unitHeight, gameState.grid[row][col]);
         }
     }
@@ -1140,8 +1130,8 @@ const renderGrid = (width, height) => {
 let selectionAlpha = 1;
 let refreshRotation = 0;
 /**
- * 
- * @param {number} width 
+ *
+ * @param {number} width
  * @param {number} height
  */
 const renderDraft = (width, height) => {
@@ -1153,10 +1143,10 @@ const renderDraft = (width, height) => {
     for (let idx = 0; idx < gameState.draft.options.length; ++idx) {
         const row = 0.5;
         const col = (3 * idx + 4.5);
-        const coord = { row: row, col: col };
+        const coord = {row: row, col: col};
         const draftedRoom = gameState.draft.options[idx];
 
-        if (idx == gameState.draft.index) {
+        if (idx === gameState.draft.index) {
             if (Effects[draftedRoom.events.enter].description !== "noop") {
                 const textX = 2.5 * unitWidth;
                 const textY = (row - 0.25) * unitHeight;
@@ -1220,8 +1210,8 @@ const renderDraft = (width, height) => {
 };
 
 /**
- * 
- * @param {number} width 
+ *
+ * @param {number} width
  * @param {number} height
  */
 const renderMovementAndHints = (width, height) => {
@@ -1291,7 +1281,7 @@ const render = () => {
 
     const tileSize = Math.min(128, Math.floor(Math.min(canvas.width / cols, canvas.height / rows)));
 
-    context.fillStyle = "#181818";
+    context.fillStyle = "#1D1D1D";
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     // drawKeyLabel("W", 150, 150);
@@ -1338,8 +1328,8 @@ const render = () => {
 };
 
 /**
- * 
- * @param {KeyboardEvent} event 
+ *
+ * @param {KeyboardEvent} event
  */
 const handleInput = (event) => {
     if (gameState.currentState === "move") {
@@ -1407,7 +1397,7 @@ const handleInput = (event) => {
 }
 
 /**
- * 
+ *
  * @param {number} timestamp - timestamp since last call
  */
 const gameLoop = (timestamp) => {
