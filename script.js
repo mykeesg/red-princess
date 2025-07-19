@@ -2,6 +2,7 @@
 // noinspection UnnecessaryLocalVariableJS
 
 let DEBUG_MODE = false;
+let USE_HEX_GRID = true;
 /**
  * A coordinate on the grid, identified by its row and column.
  * @typedef {{row: number, col: number}} Coord
@@ -13,6 +14,10 @@ let DEBUG_MODE = false;
  *  */
 
 /**
+ * @typedef {{cx: number, cy: number, width: number, height:number}} Hexagon
+ */
+
+/**
  * A hallway, connecting rooms. Hallways are not necessarily present in a room, in this case they are not enabled.
  * Otherwise, depending on what's on the _other side_, their status can differ.
  * @typedef {{status: "unknown" | "open" | "blocked", enabled: boolean }} Hallway
@@ -20,8 +25,26 @@ let DEBUG_MODE = false;
 
 /**
  * Direction of movement on the grid
- * @typedef {"UP"|"DOWN"|"LEFT"|"RIGHT"} Direction
+ * @typedef {
+ * "NORTH" |
+ * "NORTH_EAST" |
+ * "SOUTH_EAST" |
+ * "SOUTH" |
+ * "SOUTH_WEST" |
+ * "NORTH_WEST"
+ * } Direction
  */
+
+/** @type {Direction[]} */
+const DIRECTION_VALUES = [
+    "NORTH",
+    "NORTH_EAST",
+    //"EAST",
+    "SOUTH_EAST",
+    "SOUTH",
+    "SOUTH_WEST",
+    //"WEST",
+    "NORTH_WEST"];
 
 /**
  * Events related to room activities
@@ -29,12 +52,13 @@ let DEBUG_MODE = false;
  */
 /**
  * What can be found in a room
- * @typedef {"keys"|"gems"|"steps"} Item
+ * @typedef {"keys"|"lock"|"gems"|"steps"} Item
  */
 
 /** @type {Record<Item, string>} */
 const ItemTexts = {
     "keys": "🔑",
+    "lock": "🔒",
     "gems": "💎",
     "steps": "👣",
 };
@@ -235,10 +259,14 @@ class Room {
             "use": "noop",
         }
         this.hallways = {
-            UP: {status: "unknown", enabled: true},
-            DOWN: {status: "unknown", enabled: true},
-            LEFT: {status: "unknown", enabled: true},
-            RIGHT: {status: "unknown", enabled: true},
+            NORTH: {status: "unknown", enabled: true},
+            NORTH_EAST: {status: "unknown", enabled: true},
+            //EAST: {status: "unknown", enabled: true},
+            SOUTH_EAST: {status: "unknown", enabled: true},
+            SOUTH: {status: "unknown", enabled: true},
+            SOUTH_WEST: {status: "unknown", enabled: true},
+            // WEST: {status: "unknown", enabled: true},
+            NORTH_WEST: {status: "unknown", enabled: true},
         };
         this.revealed = false;
         this.triggerCount = 0;
@@ -286,7 +314,7 @@ class Room {
     copy() {
         return new Room(JSON.parse(JSON.stringify(this)));
     }
-};
+}
 
 /** @type {HTMLCanvasElement} */
 // @ts-ignore
@@ -459,16 +487,6 @@ const CSS_COLOR_NAMES = {
  */
 const clamp = (value, lower, upper) => value < lower ? lower : value > upper ? upper : value;
 
-const sleep = (duration = 1000) => new Promise(r => setTimeout(r, duration));
-
-const DIRECTIONS = {
-    UP: {row: -1, col: 0},
-    DOWN: {row: 1, col: 0},
-    LEFT: {row: 0, col: -1},
-    RIGHT: {row: 0, col: 1},
-    NONE: {row: 0, col: 0},
-};
-
 const ROOM_COLORS = {
     "noop": "#AF6C31",
     "taxes": "#AE0000",
@@ -505,7 +523,7 @@ const gameState = {
     /** @type {{index: number, position: Coord, direction: Direction, options: Room[] }} */
     draft: {
         index: 0,
-        direction: "RIGHT",
+        direction: "NORTH",
         position: {
             row: 0,
             col: 0,
@@ -541,6 +559,33 @@ const hidden = (coord) => valid(coord) && !at(coord).revealed;
  * */
 const add = (x, y) => ({row: x.row + y.row, col: x.col + y.col});
 
+const HEX_DIRECTIONS_ODD_Q = {
+    NORTH: {row: -1, col: 0},
+    NORTH_EAST: {row: 0, col: +1},
+    SOUTH_EAST: {row: +1, col: +1},
+    SOUTH: {row: +1, col: 0},
+    SOUTH_WEST: {row: +1, col: -1},
+    NORTH_WEST: {row: 0, col: -1},
+};
+
+const HEX_DIRECTIONS_EVEN_Q = {
+    NORTH: {row: -1, col: 0},
+    NORTH_EAST: {row: -1, col: +1},
+    SOUTH_EAST: {row: 0, col: +1},
+    SOUTH: {row: +1, col: 0},
+    SOUTH_WEST: {row: 0, col: -1},
+    NORTH_WEST: {row: -1, col: -1},
+};
+/**
+ * @param {Coord} position
+ * @param {Direction} direction
+ * @return {Coord}
+ * */
+const tileTowards = (position, direction) => {
+    const offset = position.col % 2 === 0 ? HEX_DIRECTIONS_EVEN_Q[direction] : HEX_DIRECTIONS_ODD_Q[direction];
+    return add(position, offset);
+}
+
 const randomRoomPurpose = () => {
     const effects = Object.values(Effects);
     const sum = effects.reduce((acc, r) => acc + r.rarity, 0);
@@ -558,10 +603,14 @@ const randomRoomPurpose = () => {
  * @returns {Direction}
  *  */
 const opposite = (direction) => {
-    if (direction === "DOWN") return "UP";
-    if (direction === "UP") return "DOWN";
-    if (direction === "LEFT") return "RIGHT";
-    if (direction === "RIGHT") return "LEFT";
+    if (direction === "NORTH") return "SOUTH";
+    if (direction === "NORTH_EAST") return "SOUTH_WEST";
+    //if (direction === "EAST") return "WEST";
+    if (direction === "SOUTH_EAST") return "NORTH_WEST";
+    if (direction === "SOUTH") return "NORTH";
+    if (direction === "SOUTH_WEST") return "NORTH_EAST";
+    //if (direction === "WEST") return "EAST";
+    if (direction === "NORTH_WEST") return "SOUTH_EAST";
     throw new Error();
 }
 
@@ -579,10 +628,14 @@ const newGame = () => {
     };
     at(gameState.player).revealed = true;
     at(gameState.player).hallways = {
-        UP: {status: "unknown", enabled: true},
-        DOWN: {status: "unknown", enabled: true},
-        RIGHT: {status: "unknown", enabled: true},
-        LEFT: {status: "blocked", enabled: true},
+        NORTH: {status: "unknown", enabled: true},
+        NORTH_EAST: {status: "unknown", enabled: true},
+        //EAST: {status: "unknown", enabled: true},
+        SOUTH_EAST: {status: "unknown", enabled: true},
+        SOUTH: {status: "unknown", enabled: true},
+        SOUTH_WEST: {status: "blocked", enabled: true},
+        //WEST: {status: "blocked", enabled: true},
+        NORTH_WEST: {status: "blocked", enabled: true},
     };
     gameState.exit = {row: 2, col: 9};
     at(gameState.exit).events = {
@@ -592,10 +645,14 @@ const newGame = () => {
     };
     at(gameState.exit).revealed = true;
     at(gameState.exit).hallways = {
-        UP: {status: "unknown", enabled: true},
-        DOWN: {status: "unknown", enabled: true},
-        RIGHT: {status: "blocked", enabled: true},
-        LEFT: {status: "unknown", enabled: true},
+        NORTH: {status: "open", enabled: true},
+        NORTH_EAST: {status: "unknown", enabled: true},
+        //EAST: {status: "unknown", enabled: true},
+        SOUTH_EAST: {status: "unknown", enabled: true},
+        SOUTH: {status: "open", enabled: true},
+        SOUTH_WEST: {status: "open", enabled: true},
+        //WEST: {status: "open", enabled: true},
+        NORTH_WEST: {status: "open", enabled: true},
     };
     gameState.isRunning = true;
     gameState.steps = 40;
@@ -607,7 +664,7 @@ const newGame = () => {
             row: 0,
             col: 0,
         },
-        direction: "UP",
+        direction: "NORTH",
         options: [
             new Room(),
             new Room(),
@@ -661,7 +718,7 @@ const removeInventoryItem = (item, amount = 1) => {
  *  */
 const generateHallway = (position, direction, draftRoom) => {
     const chance = 0.4;
-    const neighborPos = add(position, DIRECTIONS[direction]);
+    const neighborPos = tileTowards(position, direction);
     if (valid(neighborPos)) {
         if (Math.random() < chance) {
             const neighbor = at(neighborPos);
@@ -703,10 +760,9 @@ const generateDraftRoom = (index, direction) => {
         room.items.length = 0;
     }
 
-    generateHallway(gameState.draft.position, "UP", room);
-    generateHallway(gameState.draft.position, "DOWN", room);
-    generateHallway(gameState.draft.position, "LEFT", room);
-    generateHallway(gameState.draft.position, "RIGHT", room);
+    DIRECTION_VALUES.forEach((direction) => {
+        generateHallway(gameState.draft.position, direction, room);
+    });
 
     room.hallways[opposite(direction)].enabled = true;
     room.hallways[opposite(direction)].status = "open";
@@ -734,7 +790,7 @@ let playerAnimationIsPlaying = false;
 const updatePlayerPosition = (direction) => {
     if (!gameState.isRunning) return;
 
-    const newPosition = add(gameState.player, DIRECTIONS[direction]);
+    const newPosition = tileTowards(gameState.player, direction);
     if (!valid(newPosition)) return;
     if (gameState.steps <= 0) return;
     const hallways = at(gameState.player).hallways;
@@ -744,7 +800,6 @@ const updatePlayerPosition = (direction) => {
             gameState.draft.direction = direction;
             gameState.currentState = "draft";
             refreshDrafts();
-            return;
         } else if (at(newPosition).hallways[opposite(direction)].enabled) {
             at(newPosition).enter();
             gameState.player = newPosition;
@@ -765,10 +820,8 @@ const placeRoom = () => {
     gameState.grid[gameState.draft.position.row][gameState.draft.position.col] = newRoom;
     updatePlayerPosition(gameState.draft.direction);
     gameState.draft.index = 0;
-    /** @type {Direction[]} */
-    const dirs = ["UP", "DOWN", "LEFT", "RIGHT"];
-    dirs.forEach(direction => {
-        const neighborPos = add(gameState.draft.position, DIRECTIONS[direction]);
+    DIRECTION_VALUES.forEach(direction => {
+        const neighborPos = tileTowards(gameState.draft.position, direction);
         if (valid(neighborPos) && !hidden(neighborPos)) {
             const neighbor = at(neighborPos);
             if (!newRoom.hallways[direction].enabled && neighbor.hallways[opposite(direction)].enabled) {
@@ -828,7 +881,7 @@ const rotateSpin = (startAngle, endAngle, duration, onUpdate, loop = false, opti
  * @param {number} midY
  * @param {number} unitWidth
  * @param {number} unitHeight
- * @param {"UP" | "DOWN" | "RIGHT" | "LEFT"} direction
+ * @param {Direction} direction
  */
 const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) => {
     if (!hallway.enabled) return;
@@ -855,22 +908,15 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
     const lineWidth = Math.max(10, Math.floor(unitWidth / 10));
     const lineHeight = Math.max(10, Math.floor(unitHeight / 10));
 
-    if (direction === "UP") {
-        context.strokeRect(midX - lineWidth / 2, midY - unitHeight / factor, lineWidth, unitHeight / factor);
-        context.fillRect(midX - lineWidth / 2, midY - unitHeight / factor, lineWidth, unitHeight / factor);
-    }
-    if (direction === "DOWN") {
-        context.strokeRect(midX - lineWidth / 2, midY, lineWidth, unitHeight / factor);
-        context.fillRect(midX - lineWidth / 2, midY, lineWidth, unitHeight / factor);
-    }
-    if (direction === "RIGHT") {
-        context.strokeRect(midX, midY - lineHeight / 2, unitWidth / factor, lineHeight);
-        context.fillRect(midX, midY - lineHeight / 2, unitWidth / factor, lineHeight);
-    }
-    if (direction === "LEFT") {
-        context.strokeRect(midX - unitWidth / factor, midY - lineHeight / 2, unitWidth / factor, lineHeight);
-        context.fillRect(midX - unitWidth / factor, midY - lineHeight / 2, unitWidth / factor, lineHeight);
-    }
+    const drawRotatedRect = (x, y, width, height, angleRad) => {
+        context.save();
+        context.translate(x, y);
+        context.rotate(angleRad);
+        context.strokeRect(-width / 2, -height, width, height);
+        context.fillRect(-width / 2, -height, width, height);
+        context.restore();
+    };
+    drawRotatedRect(midX, midY, lineWidth, unitHeight / factor, DIRECTION_VALUES.indexOf(direction) * Math.PI / 3);
 };
 
 /**
@@ -900,15 +946,12 @@ const renderRoom = (coord, unitWidth, unitHeight, room) => {
     context.fill();
 
     context.globalAlpha = 1; // reset
-    renderHallway(hallways.UP, midX, midY, unitWidth, unitHeight, "UP");
-    renderHallway(hallways.DOWN, midX, midY, unitWidth, unitHeight, "DOWN");
-    renderHallway(hallways.LEFT, midX, midY, unitWidth, unitHeight, "LEFT");
-    renderHallway(hallways.RIGHT, midX, midY, unitWidth, unitHeight, "RIGHT");
+    renderHallway(hallways.NORTH, midX, midY, unitWidth, unitHeight, "NORTH");
+    renderHallway(hallways.SOUTH, midX, midY, unitWidth, unitHeight, "SOUTH");
+    // renderHallway(hallways.WEST, midX, midY, unitWidth, unitHeight, "WEST");
+    // renderHallway(hallways.EAST, midX, midY, unitWidth, unitHeight, "EAST");
 
-    context.beginPath();
-    context.arc(midX, midY, 14, 0, Math.PI * 2);
-    context.fillStyle = CSS_COLOR_NAMES.Lavender;
-    context.fill();
+    renderCircle(midX, midY, 14, {fill: CSS_COLOR_NAMES.Lavender});
 };
 
 
@@ -974,24 +1017,25 @@ const drawKeyLabel = (label, centerX, centerY) => {
     const paddingY = 5;
     const fontSize = 20;
 
+    context.save();
     context.font = `${fontSize}px monospace`;
     const textWidth = context.measureText(label).width;
 
     const boxWidth = textWidth + paddingX * 2;
     const boxHeight = fontSize + paddingY * 2;
 
-    // Draw background rectangle (like a key)
     context.fillStyle = "#f0f0f0"; // key background
     context.strokeStyle = "#333";  // border color
     context.lineWidth = 1;
-    context.fillRect(centerX, centerY, boxWidth, boxHeight);
-    context.strokeRect(centerX, centerY, boxWidth, boxHeight);
+    context.fillRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
+    context.strokeRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
 
-    // Draw text centered
-    context.fillStyle = "#000";
     context.textBaseline = "middle";
     context.textAlign = "center";
-    context.fillText(label, centerX + boxWidth / 2, centerY + boxHeight / 2);
+    context.fillStyle = "#333";
+    context.lineWidth = 1;
+    context.fillText(label, centerX, centerY);
+    context.restore();
 }
 
 /**
@@ -1066,6 +1110,78 @@ const renderPlayer = (width, height) => {
 
 /**
  *
+ * @param {number} row
+ * @param {number} col
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {number} maxHexHeight
+ */
+const drawHex = (row, col, cx, cy, r, maxHexHeight) => {
+    context.beginPath();
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i);
+        const x = cx + r * Math.cos(angle);
+        const y = cy + r * Math.sin(angle);
+        if (i === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+    }
+    context.closePath();
+    const coord = {row: row, col: col};
+    if (valid(coord) && !hidden(coord)) {
+        context.fillStyle = ROOM_COLORS[gameState.grid[row][col].events.enter];
+    } else {
+        context.fillStyle = "#1D1D1D";
+    }
+    context.fill();
+    if (DEBUG_MODE) {
+        context.stroke();
+    }
+    if (valid(coord) && !hidden(coord)) {
+        DIRECTION_VALUES.forEach((direction) => {
+            renderHallway(gameState.grid[row][col].hallways[direction], cx, cy, r, maxHexHeight, direction);
+        });
+        // room middle
+        context.beginPath();
+        context.arc(cx, cy, 15, 0, Math.PI * 2);
+        context.fillStyle = CSS_COLOR_NAMES.Lavender;
+        context.fill();
+    }
+    if (row === gameState.player.row && col === gameState.player.col) {
+        // player
+        context.beginPath();
+        context.arc(cx, cy, 10, 0, Math.PI * 2);
+        context.fillStyle = PLAYER_COLOR;
+        context.fill();
+    }
+};
+/**
+ *
+ * @param {number} rows
+ * @param {number} cols
+ * @param {number} width
+ * @param {number} height
+ */
+const renderHexGrid = (rows, cols, width, height) => {
+    if (!USE_HEX_GRID) {
+        return;
+    }
+
+    const hexRadius = width / ((cols + 1) * 0.75 + 1);
+    const maxHexHeight = height / (rows + 0.5);
+    const r = Math.min(hexRadius, maxHexHeight / Math.sqrt(3));
+    for (let col = 0; col < cols + 4; col++) {
+        const cx = (1.5 * col + 1) * r;
+        for (let row = 0; row < rows; row++) {
+            const offsetY = (col % 2 === 0) ? 0 : maxHexHeight / 2;
+            const cy = row * maxHexHeight + offsetY + maxHexHeight / 2;
+            drawHex(row, col, cx, cy, r, maxHexHeight);
+        }
+    }
+}
+
+/**
+ *
  * @param {number} width
  * @param {number} height
  */
@@ -1076,6 +1192,13 @@ const renderGrid = (width, height) => {
     context.lineWidth = 2;
 
     const cols = gameState.cols;
+    const rows = gameState.rows;
+
+    if (USE_HEX_GRID) {
+        renderHexGrid(rows, cols, width, height);
+        return;
+    }
+
     // Vertical lines
     if (DEBUG_MODE) {
         for (let col = 0; col <= cols; ++col) {
@@ -1086,7 +1209,6 @@ const renderGrid = (width, height) => {
             context.stroke();
         }
     }
-    const rows = gameState.rows;
     // Horizontal lines
     if (DEBUG_MODE) {
         for (let row = 0; row <= rows; ++row) {
@@ -1129,6 +1251,153 @@ const renderGrid = (width, height) => {
 
 let selectionAlpha = 1;
 let refreshRotation = 0;
+
+
+/**
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {{fill?: string, border?: string, borderWidth?: number}} colors
+ */
+const renderHexagon = (cx, cy, r, colors) => {
+    /*
+               r
+          +----T----+         ^
+         /     |     \        |
+        /      |r_i   \       |
+       +       X       +      | height
+        \             /       |
+         \           /        |
+          +---------+         v
+
+       <-------------->
+              width
+     */
+    const height = Math.sqrt(3) * r;
+    const width = 2 * r;
+    const innerRadius = height / 2;
+
+    context.save();
+    context.beginPath();
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i);
+        const x = cx + r * Math.cos(angle);
+        const y = cy + r * Math.sin(angle);
+        if (i === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+    }
+    context.closePath();
+    if (colors.fill) {
+        context.fillStyle = colors.fill;
+        context.fill();
+    }
+    if (colors.border) {
+        context.strokeStyle = colors.border;
+        context.lineWidth = colors.borderWidth ?? 1;
+        context.stroke();
+    }
+    DIRECTION_VALUES.forEach((direction) => {
+        //    renderHallway(draftedRoom.hallways[direction], cx, cy, unitWidth, 100, direction);
+    });
+    context.restore();
+};
+
+/**
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {{fill?: string, border?: string, borderWidth?: number}} colors
+ */
+const renderCircle = (cx, cy, r, colors) => {
+    context.save();
+    context.beginPath();
+    context.arc(cx, cy, r, 0, Math.PI * 2);
+    if (colors.fill) {
+        context.fillStyle = colors.fill;
+        context.fill();
+    }
+    if (colors.border) {
+        context.strokeStyle = colors.border;
+        context.lineWidth = colors.borderWidth ?? 1;
+        context.stroke();
+    }
+    context.restore();
+};
+
+/**
+ *
+ * @param {number} width
+ * @param {number} height
+ */
+const renderHexDraft = (width, height) => {
+    for (let idx = 0; idx < gameState.draft.options.length; ++idx) {
+        const row = 0.5;
+        const col = (3 * idx + 4.5);
+        const draftedRoom = gameState.draft.options[idx];
+        const unitWidth = width / 16;
+        const unitHeight = height / 2;
+
+        const cx = col * unitWidth;
+        const cy = unitHeight;
+        const r = unitWidth * 0.75;
+        renderHexagon(cx, cy, unitWidth * 0.5, {
+            fill: ROOM_COLORS[draftedRoom.events.enter],
+            border: "white",
+            borderWidth: 2
+        });
+
+        if (idx === gameState.draft.index) {
+            if (Effects[draftedRoom.events.enter].description !== "noop") {
+                const textY = (row + 1.25) * unitHeight;
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillStyle = "white";
+                context.font = "25px Consolas";
+                context.fillText(Effects[draftedRoom.events.enter].description, cx, textY);
+            }
+
+            if (draftedRoom.needsKey) {
+                const iconX = (col - 1.25) * unitWidth;
+                const iconY = unitHeight;
+                context.font = "50px monospace";
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText(ItemTexts.lock, iconX, iconY);
+            }
+
+            if (draftedRoom.items.includes("keys")) {
+                const iconX = (col + 1.25) * unitWidth;
+                const iconY = unitHeight;
+                context.font = "50px monospace";
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText(ItemTexts.keys, iconX, iconY);
+            }
+
+            const closedRoom = draftedRoom.needsKey && getInventoryItemCount("keys") === 0;
+            context.save();
+            context.globalAlpha = selectionAlpha;
+            renderHexagon(cx, cy, 0.8 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
+            context.restore();
+        }
+        DIRECTION_VALUES.forEach((direction) => {
+            renderHallway(draftedRoom.hallways[direction], cx, cy, unitWidth, 100, direction);
+        });
+        renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+    }
+
+    // if (getInventoryItemCount("gems") >= 2) {
+    //     const arrowX = (14.5 * unitWidth);
+    //     const arrowY = unitHeight;
+    //     drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
+    //     context.textAlign = 'center';
+    //     context.textBaseline = 'middle';
+    //     context.fillStyle = "white";
+    //     context.font = "26px monospace";
+    //     context.fillText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight);
+    //     context.fillText("[R]", 14.5 * unitWidth, 2 * unitHeight);
+    // }
+}
 /**
  *
  * @param {number} width
@@ -1136,6 +1405,10 @@ let refreshRotation = 0;
  */
 const renderDraft = (width, height) => {
     if (gameState.currentState !== "draft") return;
+    if (USE_HEX_GRID) {
+        renderHexDraft(width, height);
+        return;
+    }
 
     const unitWidth = width / 16;
     const unitHeight = height / 2;
@@ -1163,7 +1436,7 @@ const renderDraft = (width, height) => {
                 context.font = "50px monospace";
                 context.textAlign = 'center';
                 context.textBaseline = 'middle';
-                context.fillText("🔒", iconX, iconY);
+                context.fillText(ItemTexts.lock, iconX, iconY);
             }
             if (draftedRoom.items.includes("keys")) {
                 const iconX = (col + 1.5) * unitWidth;
@@ -1220,7 +1493,7 @@ const renderMovementAndHints = (width, height) => {
     context.fillStyle = "white";
     context.font = "20px monospace";
     const texts = [
-        "Move with arrows or [W][A][S][D]. Draft rooms by selecting an option and press [Space] or [Enter].",
+        "Draft rooms by selecting an option and press [Space] or [Enter].",
         "Some rooms are locked behind a key, so look out for them to help on your journey!",
         "Different rooms can help or hinder you. Gems help you refresh your draft options. Spend them wisely!",
         "Red paths are blocked from the other side. Gray ones are yet unvisited, while whites are already known.",
@@ -1230,6 +1503,27 @@ const renderMovementAndHints = (width, height) => {
     texts.forEach((text, idx) => {
         context.fillText(text, width / 2, idx * innerUnitHeight + 10);
     });
+    const unitWidth = width / 16;
+    const unitHeight = height / 2;
+
+    const cx = 1.5 * unitWidth;
+    const cy = unitHeight;
+    const r = unitWidth * 0.75;
+    renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
+    DIRECTION_VALUES.forEach((direction) => {
+        renderHallway({enabled: true, status: "open"}, cx, cy, unitWidth, unitHeight, direction);
+    });
+    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+
+    const controls = ["D", "S", "A", "Q", "W", "E"];
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i + 30);
+        const x = cx + 1.1 * r * Math.cos(angle);
+        const y = cy + 1.1 * r * Math.sin(angle);
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        drawKeyLabel(controls[i], x, y);
+    }
 };
 
 const render = () => {
@@ -1324,7 +1618,6 @@ const render = () => {
             context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
         }
     }
-
 };
 
 /**
@@ -1334,27 +1627,32 @@ const render = () => {
 const handleInput = (event) => {
     if (gameState.currentState === "move") {
         switch (event.key) {
-            case "ArrowDown":
-            case "s":
-                updatePlayerPosition("DOWN");
-                break;
-            case "ArrowUp":
             case "w":
-                updatePlayerPosition("UP");
+                updatePlayerPosition("NORTH");
                 break;
-            case "ArrowLeft":
-            case "a":
-                updatePlayerPosition("LEFT");
+            case "e":
+                updatePlayerPosition("NORTH_EAST");
                 break;
-            case "ArrowRight":
             case "d":
-                updatePlayerPosition("RIGHT");
+                updatePlayerPosition("SOUTH_EAST");
+                break;
+            case "s":
+                updatePlayerPosition("SOUTH");
+                break;
+            case "a":
+                updatePlayerPosition("SOUTH_WEST");
+                break;
+            case "q":
+                updatePlayerPosition("NORTH_WEST");
                 break;
             case "r":
                 newGame();
                 break;
             case "h":
                 DEBUG_MODE = !DEBUG_MODE;
+                break;
+            case "j":
+                //USE_HEX_GRID = !USE_HEX_GRID;
                 break;
             case "g":
                 addInventoryItem("gems", 5);
@@ -1385,6 +1683,9 @@ const handleInput = (event) => {
                 break;
             case "h":
                 DEBUG_MODE = !DEBUG_MODE;
+                break;
+            case "j":
+//USE_HEX_GRID = !USE_HEX_GRID;
                 break;
             case "g":
                 addInventoryItem("gems", 5);
