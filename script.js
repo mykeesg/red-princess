@@ -2,7 +2,7 @@
 // noinspection UnnecessaryLocalVariableJS
 
 let DEBUG_MODE = false;
-let USE_HEX_GRID = true;
+
 /**
  * A coordinate on the grid, identified by its row and column.
  * @typedef {{row: number, col: number}} Coord
@@ -57,10 +57,10 @@ const DIRECTION_VALUES = [
 
 /** @type {Record<Item, string>} */
 const ItemTexts = {
+    "steps": "👣",
     "keys": "🔑",
     "lock": "🔒",
     "gems": "💎",
-    "steps": "👣",
 };
 
 /**
@@ -478,6 +478,23 @@ const CSS_COLOR_NAMES = {
     YellowGreen: '#9ACD32',
 };
 
+const randomColor = () => Object.values(CSS_COLOR_NAMES)[Math.floor(Math.random() * Object.values(CSS_COLOR_NAMES).length)];
+
+/**
+ * @param {{fill?: string, border?: string, borderWidth?: number}} colors
+ */
+const useColors = (colors) => {
+    if (colors.fill) {
+        context.fillStyle = colors.fill;
+        context.fill();
+    }
+    if (colors.border) {
+        context.strokeStyle = colors.border;
+        context.lineWidth = colors.borderWidth ?? 1;
+        context.stroke();
+    }
+}
+
 /**
  *
  * @param {number} value
@@ -507,7 +524,7 @@ const gameState = {
     /** @type {number} */
     rows: 5,
     /** @type {number} */
-    cols: 10,
+    cols: 13,
     /** @type {Coord} */
     player: {row: 2, col: 0},
     /** @type {Coord} */
@@ -535,6 +552,7 @@ const gameState = {
         keys: 0,
         gems: 0,
         steps: 0,
+        lock: 0,
     },
     /** @type {number} */
     lastTimeStamp: 0,
@@ -637,7 +655,7 @@ const newGame = () => {
         //WEST: {status: "blocked", enabled: true},
         NORTH_WEST: {status: "blocked", enabled: true},
     };
-    gameState.exit = {row: 2, col: 9};
+    gameState.exit = {row: 2, col: 12};
     at(gameState.exit).events = {
         enter: "exit",
         exit: "noop",
@@ -906,8 +924,6 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
     context.strokeStyle = "black";
 
     const lineWidth = Math.max(10, Math.floor(unitWidth / 10));
-    const lineHeight = Math.max(10, Math.floor(unitHeight / 10));
-
     const drawRotatedRect = (x, y, width, height, angleRad) => {
         context.save();
         context.translate(x, y);
@@ -921,37 +937,18 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
 
 /**
  *
- * @param {Coord} coord
- * @param {number} unitWidth
- * @param {number} unitHeight
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
  * @param {Room} room
  */
-const renderRoom = (coord, unitWidth, unitHeight, room) => {
+const renderHexRoom = (cx, cy, r, room) => {
     if (!room.revealed) return;
-    const hallways = room.hallways;
-
-    const roomX = (coord.col * unitWidth);
-    const roomY = (coord.row * unitHeight);
-
-    context.fillStyle = ROOM_COLORS[room.events.enter];
-    context.fillRect(roomX, roomY, unitWidth, unitHeight);
-
-
-    const midX = roomX + unitWidth / 2;
-    const midY = roomY + unitHeight / 2;
-
-    context.beginPath();
-    context.arc(midX, midY, 14.5, 0, Math.PI * 2);
-    context.fillStyle = "black";
-    context.fill();
-
-    context.globalAlpha = 1; // reset
-    renderHallway(hallways.NORTH, midX, midY, unitWidth, unitHeight, "NORTH");
-    renderHallway(hallways.SOUTH, midX, midY, unitWidth, unitHeight, "SOUTH");
-    // renderHallway(hallways.WEST, midX, midY, unitWidth, unitHeight, "WEST");
-    // renderHallway(hallways.EAST, midX, midY, unitWidth, unitHeight, "EAST");
-
-    renderCircle(midX, midY, 14, {fill: CSS_COLOR_NAMES.Lavender});
+    renderHexagon(cx, cy, r, {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3, fill: ROOM_COLORS[room.events.enter]});
+    DIRECTION_VALUES.forEach((direction) => {
+        renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
+    });
+    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
 };
 
 
@@ -1094,160 +1091,31 @@ const renderInventory = (width, height) => {
  * @param {number} width
  * @param {number} height
  */
-const renderPlayer = (width, height) => {
-    const unitWidth = width / gameState.cols;
-    const unitHeight = height / gameState.rows;
+const renderHexGrid = (width, height) => {
+    context.strokeStyle = "#CECECE";
+    context.lineWidth = 2;
+    const cols = gameState.cols;
+    const rows = gameState.rows;
+    const unitWidth = width / 10;
+    const unitHeight = height / 5;
+    const r = unitWidth / 2;
 
-    //player
-    const playerX = gameState.player.col * unitWidth;
-    const playerY = gameState.player.row * unitHeight;
-
-    context.beginPath();
-    context.arc(playerX + unitWidth / 2, playerY + unitHeight / 2, 10, 0, Math.PI * 2);
-    context.fillStyle = PLAYER_COLOR;
-    context.fill();
-};
-
-/**
- *
- * @param {number} row
- * @param {number} col
- * @param {number} cx
- * @param {number} cy
- * @param {number} r
- * @param {number} maxHexHeight
- */
-const drawHex = (row, col, cx, cy, r, maxHexHeight) => {
-    context.beginPath();
-    for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 180 * (60 * i);
-        const x = cx + r * Math.cos(angle);
-        const y = cy + r * Math.sin(angle);
-        if (i === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-    }
-    context.closePath();
-    const coord = {row: row, col: col};
-    if (valid(coord) && !hidden(coord)) {
-        context.fillStyle = ROOM_COLORS[gameState.grid[row][col].events.enter];
-    } else {
-        context.fillStyle = "#1D1D1D";
-    }
-    context.fill();
-    if (DEBUG_MODE) {
-        context.stroke();
-    }
-    if (valid(coord) && !hidden(coord)) {
-        DIRECTION_VALUES.forEach((direction) => {
-            renderHallway(gameState.grid[row][col].hallways[direction], cx, cy, r, maxHexHeight, direction);
-        });
-        // room middle
-        context.beginPath();
-        context.arc(cx, cy, 15, 0, Math.PI * 2);
-        context.fillStyle = CSS_COLOR_NAMES.Lavender;
-        context.fill();
-    }
-    if (row === gameState.player.row && col === gameState.player.col) {
-        // player
-        context.beginPath();
-        context.arc(cx, cy, 10, 0, Math.PI * 2);
-        context.fillStyle = PLAYER_COLOR;
-        context.fill();
-    }
-};
-/**
- *
- * @param {number} rows
- * @param {number} cols
- * @param {number} width
- * @param {number} height
- */
-const renderHexGrid = (rows, cols, width, height) => {
-    if (!USE_HEX_GRID) {
-        return;
-    }
-
-    const hexRadius = width / ((cols + 1) * 0.75 + 1);
-    const maxHexHeight = height / (rows + 0.5);
-    const r = Math.min(hexRadius, maxHexHeight / Math.sqrt(3));
-    for (let col = 0; col < cols + 4; col++) {
-        const cx = (1.5 * col + 1) * r;
-        for (let row = 0; row < rows; row++) {
-            const offsetY = (col % 2 === 0) ? 0 : maxHexHeight / 2;
-            const cy = row * maxHexHeight + offsetY + maxHexHeight / 2;
-            drawHex(row, col, cx, cy, r, maxHexHeight);
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            const hexHeight = Math.sqrt(3) * r;
+            const rowOffset = hexHeight / 2;
+            const cx = (1.5 * col + 1) * r;
+            //Shift items in even columns 1 unit down. Center is offset as well.
+            const offsetY = ((col % 2) + 1) * rowOffset;
+            const cy = (row * hexHeight) + offsetY;
+            renderHexRoom(cx, cy, r, gameState.grid[row][col]);
+            if (row === gameState.player.row && col === gameState.player.col) {
+                //player, TODO animation
+                renderCircle(cx, cy, 10, {fill: PLAYER_COLOR});
+            }
         }
     }
 }
-
-/**
- *
- * @param {number} width
- * @param {number} height
- */
-const renderGrid = (width, height) => {
-    const unitWidth = width / gameState.cols;
-    const unitHeight = height / gameState.rows;
-    context.strokeStyle = "#CECECE";
-    context.lineWidth = 2;
-
-    const cols = gameState.cols;
-    const rows = gameState.rows;
-
-    if (USE_HEX_GRID) {
-        renderHexGrid(rows, cols, width, height);
-        return;
-    }
-
-    // Vertical lines
-    if (DEBUG_MODE) {
-        for (let col = 0; col <= cols; ++col) {
-            const x = col * unitWidth;
-            context.beginPath();
-            context.moveTo(x, 0);
-            context.lineTo(x, height);
-            context.stroke();
-        }
-    }
-    // Horizontal lines
-    if (DEBUG_MODE) {
-        for (let row = 0; row <= rows; ++row) {
-            const y = row * unitHeight;
-            context.beginPath();
-            context.moveTo(0, y);
-            context.lineTo(width, y);
-            context.stroke();
-        }
-    }
-
-    // rooms
-    for (let row = 0; row < gameState.rows; ++row) {
-        for (let col = 0; col < gameState.cols; ++col) {
-            const coord = {row: row, col: col};
-            renderRoom(coord, unitWidth, unitHeight, gameState.grid[row][col]);
-        }
-    }
-
-    renderPlayer(width, height);
-
-    if (gameState.currentState === "draft") {
-        context.save();
-        const pendingRadius = 20;
-        const roomX = (gameState.draft.position.col * unitWidth + pendingRadius);
-        const roomY = (gameState.draft.position.row * unitHeight + pendingRadius);
-        context.fillStyle = ROOM_COLORS.draft;
-        context.globalAlpha = selectionAlpha;
-        context.fillRect(roomX, roomY, unitWidth - 2 * pendingRadius, unitHeight - 2 * pendingRadius);
-        context.fillStyle = "white";
-        context.font = "50px 'Sans-Sarif'";
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText("?",
-            (gameState.draft.position.col + 0.5) * unitWidth,
-            (gameState.draft.position.row + 0.5) * unitHeight);
-        context.restore();
-    }
-};
 
 let selectionAlpha = 1;
 let refreshRotation = 0;
@@ -1273,10 +1141,6 @@ const renderHexagon = (cx, cy, r, colors) => {
        <-------------->
               width
      */
-    const height = Math.sqrt(3) * r;
-    const width = 2 * r;
-    const innerRadius = height / 2;
-
     context.save();
     context.beginPath();
     for (let i = 0; i < 6; i++) {
@@ -1287,18 +1151,7 @@ const renderHexagon = (cx, cy, r, colors) => {
         else context.lineTo(x, y);
     }
     context.closePath();
-    if (colors.fill) {
-        context.fillStyle = colors.fill;
-        context.fill();
-    }
-    if (colors.border) {
-        context.strokeStyle = colors.border;
-        context.lineWidth = colors.borderWidth ?? 1;
-        context.stroke();
-    }
-    DIRECTION_VALUES.forEach((direction) => {
-        //    renderHallway(draftedRoom.hallways[direction], cx, cy, unitWidth, 100, direction);
-    });
+    useColors(colors);
     context.restore();
 };
 
@@ -1312,15 +1165,8 @@ const renderCircle = (cx, cy, r, colors) => {
     context.save();
     context.beginPath();
     context.arc(cx, cy, r, 0, Math.PI * 2);
-    if (colors.fill) {
-        context.fillStyle = colors.fill;
-        context.fill();
-    }
-    if (colors.border) {
-        context.strokeStyle = colors.border;
-        context.lineWidth = colors.borderWidth ?? 1;
-        context.stroke();
-    }
+    context.closePath();
+    useColors(colors);
     context.restore();
 };
 
@@ -1330,22 +1176,20 @@ const renderCircle = (cx, cy, r, colors) => {
  * @param {number} height
  */
 const renderHexDraft = (width, height) => {
+    if (gameState.currentState !== "draft") return;
+    const row = 0.5;
+    const unitWidth = width / 16;
+    const unitHeight = height / 2;
+
     for (let idx = 0; idx < gameState.draft.options.length; ++idx) {
-        const row = 0.5;
         const col = (3 * idx + 4.5);
         const draftedRoom = gameState.draft.options[idx];
-        const unitWidth = width / 16;
-        const unitHeight = height / 2;
 
         const cx = col * unitWidth;
         const cy = unitHeight;
-        const r = unitWidth * 0.75;
-        renderHexagon(cx, cy, unitWidth * 0.5, {
-            fill: ROOM_COLORS[draftedRoom.events.enter],
-            border: "white",
-            borderWidth: 2
-        });
+        const r = unitWidth * 0.5;
 
+        renderHexRoom(cx, cy, r, draftedRoom);
         if (idx === gameState.draft.index) {
             if (Effects[draftedRoom.events.enter].description !== "noop") {
                 const textY = (row + 1.25) * unitHeight;
@@ -1377,95 +1221,9 @@ const renderHexDraft = (width, height) => {
             const closedRoom = draftedRoom.needsKey && getInventoryItemCount("keys") === 0;
             context.save();
             context.globalAlpha = selectionAlpha;
-            renderHexagon(cx, cy, 0.8 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
+            renderHexagon(cx, cy, 1.2 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
             context.restore();
         }
-        DIRECTION_VALUES.forEach((direction) => {
-            renderHallway(draftedRoom.hallways[direction], cx, cy, unitWidth, 100, direction);
-        });
-        renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
-    }
-
-    // if (getInventoryItemCount("gems") >= 2) {
-    //     const arrowX = (14.5 * unitWidth);
-    //     const arrowY = unitHeight;
-    //     drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
-    //     context.textAlign = 'center';
-    //     context.textBaseline = 'middle';
-    //     context.fillStyle = "white";
-    //     context.font = "26px monospace";
-    //     context.fillText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight);
-    //     context.fillText("[R]", 14.5 * unitWidth, 2 * unitHeight);
-    // }
-}
-/**
- *
- * @param {number} width
- * @param {number} height
- */
-const renderDraft = (width, height) => {
-    if (gameState.currentState !== "draft") return;
-    if (USE_HEX_GRID) {
-        renderHexDraft(width, height);
-        return;
-    }
-
-    const unitWidth = width / 16;
-    const unitHeight = height / 2;
-
-    for (let idx = 0; idx < gameState.draft.options.length; ++idx) {
-        const row = 0.5;
-        const col = (3 * idx + 4.5);
-        const coord = {row: row, col: col};
-        const draftedRoom = gameState.draft.options[idx];
-
-        if (idx === gameState.draft.index) {
-            if (Effects[draftedRoom.events.enter].description !== "noop") {
-                const textX = 2.5 * unitWidth;
-                const textY = (row - 0.25) * unitHeight;
-                context.textAlign = 'right';
-                context.textBaseline = 'middle';
-                context.fillStyle = "white";
-                context.font = "25px Consolas";
-                context.fillText(Effects[draftedRoom.events.enter].description, textX, textY);
-            }
-
-            if (draftedRoom.needsKey) {
-                const iconX = (col - 0.5) * unitWidth;
-                const iconY = unitHeight;
-                context.font = "50px monospace";
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.fillText(ItemTexts.lock, iconX, iconY);
-            }
-            if (draftedRoom.items.includes("keys")) {
-                const iconX = (col + 1.5) * unitWidth;
-                const iconY = unitHeight;
-                context.font = "50px monospace";
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.fillText(ItemTexts.keys, iconX, iconY);
-            }
-            // @ts-ignore
-            const borderPadding = 8;
-            const x = col * unitWidth - borderPadding;
-            const y = row * unitHeight - borderPadding;
-            const borderWidth = unitWidth + 2 * borderPadding;
-            const borderHeight = unitHeight + 2 * borderPadding;
-            context.save();
-            if (draftedRoom.needsKey && getInventoryItemCount("keys") === 0) {
-                context.strokeStyle = "red";
-            } else {
-                context.strokeStyle = "yellow";
-            }
-            context.lineWidth = 6;
-            context.globalAlpha = selectionAlpha;
-            context.strokeRect(x, y, borderWidth, borderHeight);
-            context.restore();
-        }
-
-        renderRoom(coord, unitWidth, unitHeight, draftedRoom);
-
     }
 
     if (getInventoryItemCount("gems") >= 2) {
@@ -1479,9 +1237,7 @@ const renderDraft = (width, height) => {
         context.fillText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight);
         context.fillText("[R]", 14.5 * unitWidth, 2 * unitHeight);
     }
-
-};
-
+}
 /**
  *
  * @param {number} width
@@ -1578,19 +1334,13 @@ const render = () => {
     context.fillStyle = "#1D1D1D";
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    // drawKeyLabel("W", 150, 150);
-    // drawKeyLabel("A", 180, 150);
-    // drawKeyLabel("S", 210, 150);
-    // drawKeyLabel("D", 240, 150);
-
-
     const offsetX = Math.floor((canvas.width - tileSize * cols) / 2);
     const offsetY = Math.floor((canvas.height - tileSize * rows) / 2);
 
     renderInLayout(layout.header, renderGoal);
     renderInLayout(layout.inventory, renderInventory);
-    renderInLayout(layout.grid, renderGrid);
-    renderInLayout(layout.draft, renderDraft);
+    renderInLayout(layout.grid, renderHexGrid);
+    renderInLayout(layout.draft, renderHexDraft);
     renderInLayout(layout.footer, renderMovementAndHints);
 
     if (DEBUG_MODE) {
@@ -1651,9 +1401,6 @@ const handleInput = (event) => {
             case "h":
                 DEBUG_MODE = !DEBUG_MODE;
                 break;
-            case "j":
-                //USE_HEX_GRID = !USE_HEX_GRID;
-                break;
             case "g":
                 addInventoryItem("gems", 5);
                 break;
@@ -1684,9 +1431,6 @@ const handleInput = (event) => {
             case "h":
                 DEBUG_MODE = !DEBUG_MODE;
                 break;
-            case "j":
-//USE_HEX_GRID = !USE_HEX_GRID;
-                break;
             case "g":
                 addInventoryItem("gems", 5);
                 break;
@@ -1696,15 +1440,23 @@ const handleInput = (event) => {
         }
     }
 }
-
+let lastFrameTime = performance.now();
 /**
  *
  * @param {number} timestamp - timestamp since last call
  */
 const gameLoop = (timestamp) => {
+    const delta = timestamp - lastFrameTime;
+    const fps = 1000 / delta;
+    lastFrameTime = timestamp;
     gameState.lastTimestamp = timestamp;
     update(timestamp);
     render();
+    context.textAlign = 'left';
+    context.textBaseline = 'middle';
+    context.fillStyle = CSS_COLOR_NAMES.Pink;
+    context.font = "25px monospace";
+    context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
     requestAnimationFrame(gameLoop);
 }
 
