@@ -72,7 +72,7 @@ const ItemTexts = {
 const Effects = {
     "extraSteps":
         {
-            invoke: () => gameState.steps += 2,
+            invoke: () => addResourcesItem("steps", 2),
             description: "Take a rest.",
             triggerText: "You have gained 2 extra steps.",
             triggerLimit: -1,
@@ -80,7 +80,7 @@ const Effects = {
         },
     "extraKey":
         {
-            invoke: () => addInventoryItem("keys"),
+            invoke: () => addResourcesItem("keys"),
             description: "Alohomora.",
             triggerText: "You have found a key.",
             triggerLimit: 1,
@@ -88,7 +88,7 @@ const Effects = {
         },
     "money":
         {
-            invoke: () => addInventoryItem("gems"),
+            invoke: () => addResourcesItem("gems"),
             description: "What's that spark in the corner?",
             triggerText: "You have found a gem.",
             triggerLimit: 1,
@@ -96,7 +96,7 @@ const Effects = {
         },
     "taxes":
         {
-            invoke: () => removeInventoryItem("gems"),
+            invoke: () => removeResourcesItem("gems"),
             description: "Takes a toll on you.",
             triggerText: `You have to pay taxes: ${ItemTexts.gems}`,
             triggerLimit: -1,
@@ -104,7 +104,7 @@ const Effects = {
         },
     "garden":
         {
-            invoke: () => gameState.steps = 41,
+            invoke: () => setResourcesItem("steps", 41),
             description: "Like starting again.",
             triggerText: "Your steps have been reset.",
             triggerLimit: -1,
@@ -113,9 +113,9 @@ const Effects = {
     "shop":
         {
             invoke: () => {
-                if (getInventoryItemCount("gems") >= 5) {
-                    addInventoryItem("keys");
-                    removeInventoryItem("gems", 5);
+                if (getResourcesItemCount("gems") >= 5) {
+                    addResourcesItem("keys");
+                    removeResourcesItem("gems", 5);
                 }
             },
             description: "Buy your passage.",
@@ -531,8 +531,6 @@ const gameState = {
     exit: {row: 2, col: 9},
     /** @type {boolean} */
     isRunning: true,
-    /** @type {number} */
-    steps: 40,
     /** @type {string} */
     lastEffect: "noop",
     /** @type {"move"|"draft"} */
@@ -547,12 +545,11 @@ const gameState = {
         },
         options: []
     },
-    /** @type {Record<Item, number>} */
-    inventory: {
+    /** @type {Partial<Record<Item, number>>} */
+    resources: {
         keys: 0,
         gems: 0,
-        steps: 0,
-        lock: 0,
+        steps: 0
     },
     /** @type {number} */
     lastTimeStamp: 0,
@@ -673,7 +670,6 @@ const newGame = () => {
         NORTH_WEST: {status: "open", enabled: true},
     };
     gameState.isRunning = true;
-    gameState.steps = 40;
     gameState.lastEffect = "";
     gameState.currentState = "move";
     gameState.draft = {
@@ -690,41 +686,47 @@ const newGame = () => {
         ]
     };
     gameState.draft.options.forEach(draft => draft.revealed = true);
-    gameState.inventory = {
+    gameState.resources = {
+        "steps": 40,
         "keys": 1,
         "gems": 0,
-        "steps": 0,
     };
 };
 
 /**
- * Retrieves the amount of the selected item in the player inventory.
+ * Retrieves the amount of the selected item in the player resources.
  *  @param {Item} item
  *  */
-const getInventoryItemCount = (item) => gameState.inventory[item] ?? 0;
+const getResourcesItemCount = (item) => gameState.resources[item] ?? 0;
 
 /**
- * Adds the selected item to the player inventory.
+ * Adds the selected item to the player resources.
  *  @param {Item} item
  *  @param {number} amount
  *  */
-const addInventoryItem = (item, amount = 1) => {
-    if (!(item in gameState.inventory)) {
-        gameState.inventory[item] = 0;
+const addResourcesItem = (item, amount = 1) => {
+    if (!(item in gameState.resources)) {
+        gameState.resources[item] = 0;
     }
-    gameState.inventory[item] += amount;
+    gameState.resources[item] += amount;
 }
-
 /**
- * Adds the selected item to the player inventory.
+ * Sets the selected item count in the player resources.
  *  @param {Item} item
  *  @param {number} amount
  *  */
-const removeInventoryItem = (item, amount = 1) => {
-    if (item in gameState.inventory) {
-        gameState.inventory[item] -= amount;
-        if (gameState.inventory[item] < 0) {
-            gameState.inventory[item] = 0;
+const setResourcesItem = (item, amount) => gameState.resources[item] = amount
+
+/**
+ * Adds the selected item to the player resources.
+ *  @param {Item} item
+ *  @param {number} amount
+ *  */
+const removeResourcesItem = (item, amount = 1) => {
+    if (item in gameState.resources) {
+        gameState.resources[item] -= amount;
+        if (gameState.resources[item] < 0) {
+            gameState.resources[item] = 0;
         }
     }
 }
@@ -796,7 +798,7 @@ const refreshDrafts = () => {
         generateDraftRoom(0, direction);
         generateDraftRoom(1, direction);
         generateDraftRoom(2, direction);
-        canDraft = getInventoryItemCount("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
+        canDraft = getResourcesItemCount("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
     } while (!canDraft);
 }
 
@@ -810,7 +812,7 @@ const updatePlayerPosition = (direction) => {
 
     const newPosition = tileTowards(gameState.player, direction);
     if (!valid(newPosition)) return;
-    if (gameState.steps <= 0) return;
+    if (getResourcesItemCount("steps") <= 0) return;
     const hallways = at(gameState.player).hallways;
     if (hallways[direction].enabled && hallways[direction].status !== "blocked") {
         if (hidden(newPosition)) {
@@ -821,19 +823,19 @@ const updatePlayerPosition = (direction) => {
         } else if (at(newPosition).hallways[opposite(direction)].enabled) {
             at(newPosition).enter();
             gameState.player = newPosition;
-            gameState.steps -= 1;
+            removeResourcesItem("steps");
         }
     }
 }
 
 const placeRoom = () => {
     const newRoom = gameState.draft.options[gameState.draft.index].copy();
-    if (newRoom.needsKey && getInventoryItemCount("keys") === 0) {
+    if (newRoom.needsKey && getResourcesItemCount("keys") === 0) {
         return;
     }
     if (newRoom.needsKey) {
         newRoom.needsKey = false;
-        removeInventoryItem("keys");
+        removeResourcesItem("keys");
     }
     gameState.grid[gameState.draft.position.row][gameState.draft.position.col] = newRoom;
     updatePlayerPosition(gameState.draft.direction);
@@ -941,10 +943,14 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
  * @param {number} cy
  * @param {number} r
  * @param {Room} room
+ * @param {boolean} borders
  */
-const renderHexRoom = (cx, cy, r, room) => {
+const renderHexRoom = (cx, cy, r, room, borders = false) => {
     if (!room.revealed) return;
-    renderHexagon(cx, cy, r, {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3, fill: ROOM_COLORS[room.events.enter]});
+    renderHexagon(cx, cy, r, {
+        fill: ROOM_COLORS[room.events.enter],
+        ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
+    });
     DIRECTION_VALUES.forEach((direction) => {
         renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
     });
@@ -1053,13 +1059,33 @@ const renderInLayout = (zone, callback) => {
  * @param {number} height
  */
 const renderGoal = (width, height) => {
+    const unitWidth = width / 2;
+    const unitHeight = height / 5;
+
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
     context.font = "32px Consolas";
-    context.fillText(`Draft your way to the exit! Can you reach it? Watch your steps!`, width / 2, 25);
-    context.font = "25px monospace";
-    context.fillText(`Steps left: ${gameState.steps}`, width / 2, height / 2);
+    context.fillText("Movement", width / 2, unitHeight);
+
+
+    const cx = unitWidth;
+    const cy = 2.5 * unitHeight;
+    const r = unitWidth * 0.5;
+    renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
+    DIRECTION_VALUES.forEach((direction) => {
+        renderHallway({enabled: true, status: "open"}, cx, cy, unitWidth, unitHeight, direction);
+    });
+    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+    const controls = ["D", "S", "A", "Q", "W", "E"];
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i + 30);
+        const x = cx + 1.1 * r * Math.cos(angle);
+        const y = cy + 1.1 * r * Math.sin(angle);
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        drawKeyLabel(controls[i], x, y);
+    }
 };
 
 /**
@@ -1067,17 +1093,17 @@ const renderGoal = (width, height) => {
  * @param {number} width
  * @param {number} height
  */
-const renderInventory = (width, height) => {
+const renderResources = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
     context.font = "25px monospace";
-    context.fillText(`Inventory`, width / 2, 0);
+    context.fillText(`Resources`, width / 2, 0);
 
     context.textAlign = 'left';
     context.font = "20px monospace";
     const texts = [];
-    for (const [key, value] of Object.entries(gameState.inventory)) {
+    for (const [key, value] of Object.entries(gameState.resources)) {
         texts.push(`\u2022 ${ItemTexts[key]} ${key.substring(0, 1).toUpperCase() + key.substring(1)}: ${value}`);
     }
 
@@ -1189,7 +1215,7 @@ const renderHexDraft = (width, height) => {
         const cy = unitHeight;
         const r = unitWidth * 0.5;
 
-        renderHexRoom(cx, cy, r, draftedRoom);
+        renderHexRoom(cx, cy, r, draftedRoom, true);
         if (idx === gameState.draft.index) {
             if (Effects[draftedRoom.events.enter].description !== "noop") {
                 const textY = (row + 1.25) * unitHeight;
@@ -1218,7 +1244,7 @@ const renderHexDraft = (width, height) => {
                 context.fillText(ItemTexts.keys, iconX, iconY);
             }
 
-            const closedRoom = draftedRoom.needsKey && getInventoryItemCount("keys") === 0;
+            const closedRoom = draftedRoom.needsKey && getResourcesItemCount("keys") === 0;
             context.save();
             context.globalAlpha = selectionAlpha;
             renderHexagon(cx, cy, 1.2 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
@@ -1226,7 +1252,7 @@ const renderHexDraft = (width, height) => {
         }
     }
 
-    if (getInventoryItemCount("gems") >= 2) {
+    if (getResourcesItemCount("gems") >= 2) {
         const arrowX = (14.5 * unitWidth);
         const arrowY = unitHeight;
         drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
@@ -1259,27 +1285,6 @@ const renderMovementAndHints = (width, height) => {
     texts.forEach((text, idx) => {
         context.fillText(text, width / 2, idx * innerUnitHeight + 10);
     });
-    const unitWidth = width / 16;
-    const unitHeight = height / 2;
-
-    const cx = 1.5 * unitWidth;
-    const cy = unitHeight;
-    const r = unitWidth * 0.75;
-    renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
-    DIRECTION_VALUES.forEach((direction) => {
-        renderHallway({enabled: true, status: "open"}, cx, cy, unitWidth, unitHeight, direction);
-    });
-    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
-
-    const controls = ["D", "S", "A", "Q", "W", "E"];
-    for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 180 * (60 * i + 30);
-        const x = cx + 1.1 * r * Math.cos(angle);
-        const y = cy + 1.1 * r * Math.sin(angle);
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        drawKeyLabel(controls[i], x, y);
-    }
 };
 
 const render = () => {
@@ -1304,7 +1309,7 @@ const render = () => {
             height: unitHeight * 5
         },
         /** @type {Rectangle} */
-        inventory: {
+        resources: {
             x: 0,
             y: unitHeight * 2,
             width: unitWidth * 3,
@@ -1338,7 +1343,7 @@ const render = () => {
     const offsetY = Math.floor((canvas.height - tileSize * rows) / 2);
 
     renderInLayout(layout.header, renderGoal);
-    renderInLayout(layout.inventory, renderInventory);
+    renderInLayout(layout.resources, renderResources);
     renderInLayout(layout.grid, renderHexGrid);
     renderInLayout(layout.draft, renderHexDraft);
     renderInLayout(layout.footer, renderMovementAndHints);
@@ -1402,10 +1407,10 @@ const handleInput = (event) => {
                 DEBUG_MODE = !DEBUG_MODE;
                 break;
             case "g":
-                addInventoryItem("gems", 5);
+                addResourcesItem("gems", 5);
                 break;
             case "k":
-                addInventoryItem("keys", 5);
+                addResourcesItem("keys", 5);
                 break;
         }
     } else {
@@ -1423,8 +1428,8 @@ const handleInput = (event) => {
                 placeRoom();
                 break;
             case "r":
-                if (getInventoryItemCount("gems") >= 2) {
-                    removeInventoryItem("gems", 2);
+                if (getResourcesItemCount("gems") >= 2) {
+                    removeResourcesItem("gems", 2);
                     refreshDrafts();
                 }
                 break;
@@ -1432,10 +1437,10 @@ const handleInput = (event) => {
                 DEBUG_MODE = !DEBUG_MODE;
                 break;
             case "g":
-                addInventoryItem("gems", 5);
+                addResourcesItem("gems", 5);
                 break;
             case "k":
-                addInventoryItem("keys", 5);
+                addResourcesItem("keys", 5);
                 break;
         }
     }
