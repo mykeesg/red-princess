@@ -5,23 +5,63 @@ let DEBUG_MODE = false;
 
 /**
  * A coordinate on the grid, identified by its row and column.
- * @typedef {{row: number, col: number}} Coord
- *  */
-
-/**
- * Rectangle drawn on the canvas
- * @typedef {{x: number, y: number, width: number, height: number}} Rectangle
- *  */
-
-/**
- * @typedef {{cx: number, cy: number, width: number, height:number}} Hexagon
+ * @typedef {Object} Coord
+ * @property {number} row - The row index within the grid.
+ * @property {number} col - The column index within the grid.
  */
 
 /**
- * A hallway, connecting rooms. Hallways are not necessarily present in a room, in this case they are not enabled.
- * Otherwise, depending on what's on the _other side_, their status can differ.
- * @typedef {{status: "unknown" | "open" | "blocked", enabled: boolean }} Hallway
- *  */
+ * Rectangle drawn on the canvas.
+ * @typedef {Object} Rectangle
+ * @property {number} x - The X position of the top-left corner.
+ * @property {number} y - The Y position of the top-left corner.
+ * @property {number} width - Width of the rectangle.
+ * @property {number} height - Height of the rectangle.
+ */
+
+/**
+ * Represents a hexagon's geometry and position on the canvas.
+ * @typedef {Object} Hexagon
+ * @property {number} cx - The X coordinate of the hexagon's center.
+ * @property {number} cy - The Y coordinate of the hexagon's center.
+ * @property {number} width - Horizontal span (distance between opposite sides).
+ * @property {number} height - Vertical span (distance between top and bottom).
+ */
+
+/**
+ * A hallway connecting rooms. Hallways may not always be present.
+ * If enabled, their status reflects what's on the other side.
+ * @typedef {Object} Hallway
+ * @property {"unknown" | "open" | "blocked"} status - Current state of the hallway.
+ * @property {boolean} enabled - Whether the hallway is active (can be used).
+ */
+
+/**
+ * A room effect triggered by interaction such as entering, leaving, or activating the room.
+ * @typedef {Object} Effect
+ * @property {() => void} invoke - Function to trigger the effect.
+ * @property {string} description - Text describing the effect’s behavior.
+ * @property {string} triggerText - UI message shown when the effect is activated.
+ * @property {number} triggerLimit - Max number of times this effect can be triggered.
+ * @property {number} rarity - Numeric value indicating how rare this effect is.
+ */
+
+/**
+ * Represents the active state of keyboard modifier keys.
+ * @typedef {Object} ModifierState
+ * @property {boolean} shift - Whether the Shift key is currently held.
+ * @property {boolean} ctrl - Whether the Control key is currently held.
+ * @property {boolean} alt - Whether the Alt key is currently held.
+ * @property {boolean} meta - Whether the Meta key is currently held (e.g., Cmd on macOS or Windows key).
+ */
+
+/**
+ * Represents the current state of the mouse.
+ * @typedef {Object} MouseState
+ * @property {number} x - The current mouse X position (relative to canvas).
+ * @property {number} y - The current mouse Y position.
+ * @property {Set<number>} buttons - A set of pressed mouse button codes (0 = left, 1 = middle, 2 = right).
+ */
 
 /**
  * Direction of movement on the grid
@@ -61,11 +101,6 @@ const ItemTexts = {
     "gems": "💎",
 };
 
-/**
- * A room effect, which can trigger when the player enters or leaves it, or "uses" the room.
- * Some can trigger on each invocation, some only once. These are bound to the effects, not the rooms.
- * @typedef {{ invoke: () => void, description: string, triggerText: string, triggerLimit: number, rarity: number }} Effect
- *  */
 /** @type {Record<string, Effect>} */
 const Effects = {
     "extraSteps":
@@ -513,6 +548,7 @@ const ROOM_COLORS = {
 };
 
 const PLAYER_COLOR = CSS_COLOR_NAMES.Black;
+const CLEAR_COLOR = "#1D1D1D";
 
 const gameState = {
     /** @type {Room[][]} */
@@ -549,6 +585,14 @@ const gameState = {
     },
     /** @type {number} */
     lastTimeStamp: 0,
+    /** @type {number} */
+    mouseX: -1,
+    /** @type {number} */
+    mouseY: -1,
+    /** @type {number} */
+    mouseGridRow: -1,
+    /** @type {number} */
+    mouseGridCol: -1,
 };
 
 /** @param {Coord} coord */
@@ -652,12 +696,12 @@ const newGame = () => {
     };
     at(gameState.exit).revealed = true;
     at(gameState.exit).hallways = {
-        NORTH: {status: "open", enabled: true},
-        NORTH_EAST: {status: "unknown", enabled: true},
-        SOUTH_EAST: {status: "unknown", enabled: true},
-        SOUTH: {status: "open", enabled: true},
-        SOUTH_WEST: {status: "open", enabled: true},
-        NORTH_WEST: {status: "open", enabled: true},
+        NORTH: {status: "unknown", enabled: true},
+        NORTH_EAST: {status: "blocked", enabled: true},
+        SOUTH_EAST: {status: "blocked", enabled: true},
+        SOUTH: {status: "unknown", enabled: true},
+        SOUTH_WEST: {status: "unknown", enabled: true},
+        NORTH_WEST: {status: "unknown", enabled: true},
     };
     gameState.isRunning = true;
     gameState.lastEffect = "";
@@ -853,6 +897,8 @@ const update = (delta) => {
         }
     }
     animations = animations.filter((t) => t.active);
+    gameState.mouseGridRow = -1;
+    gameState.mouseGridCol = -1;
 };
 
 /**
@@ -936,15 +982,22 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
  * @param {boolean} borders
  */
 const renderHexRoom = (cx, cy, r, room, borders = false) => {
-    if (!room.revealed) return;
-    renderHexagon(cx, cy, r, {
-        fill: ROOM_COLORS[room.events.enter],
-        ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
-    });
-    DIRECTION_VALUES.forEach((direction) => {
-        renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
-    });
-    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+    if (room.revealed) {
+        renderHexagon(cx, cy, r, {
+            fill: ROOM_COLORS[room.events.enter],
+            ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
+        });
+        DIRECTION_VALUES.forEach((direction) => {
+            renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
+        });
+        renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+    } else {
+        renderHexagon(cx, cy, r, undefined,
+            {
+                fill: CLEAR_COLOR,
+                border: CSS_COLOR_NAMES.Wheat,
+            });
+    }
 };
 
 
@@ -1048,7 +1101,7 @@ const renderInLayout = (zone, callback) => {
  * @param {number} width
  * @param {number} height
  */
-const renderGoal = (width, height) => {
+const renderMovement = (width, height) => {
     const unitWidth = width / 2;
     const unitHeight = height / 5;
 
@@ -1129,6 +1182,9 @@ const renderHexGrid = (width, height) => {
                 //player, TODO animation
                 renderCircle(cx, cy, 10, {fill: PLAYER_COLOR});
             }
+            if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
+                context.fillText(`[${row};${col}]`, cx, cy);
+            }
         }
     }
 }
@@ -1136,14 +1192,38 @@ const renderHexGrid = (width, height) => {
 let selectionAlpha = 1;
 let refreshRotation = 0;
 
+/**
+ * @param {number} mouseX
+ * @param {number} mouseY
+ * @param {number} r
+ * @return {Coord}
+ */
+const mouseToGrid = (mouseX, mouseY, r) => {
+    const rows = gameState.rows;
+    const cols = gameState.cols;
+
+    const hexHeight = Math.sqrt(3) * r;
+    const rowOffset = hexHeight / 2;
+
+    const col = Math.floor((mouseX - r) / (1.5 * r));
+    const offsetY = ((col % 2) + 1) * rowOffset;
+    const row = Math.floor((mouseY - offsetY) / hexHeight + 0.5);
+
+    return {
+        row: Math.max(0, Math.min(rows - 1, row)),
+        col: Math.max(0, Math.min(cols - 1, col))
+    };
+};
+
 
 /**
  * @param {number} cx
  * @param {number} cy
  * @param {number} r
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
+ * @param {{fill?: string, border?: string, borderWidth?: number}} highlight
  */
-const renderHexagon = (cx, cy, r, colors) => {
+const renderHexagon = (cx, cy, r, colors, highlight = undefined) => {
     /*
                r
           +----T----+         ^
@@ -1167,7 +1247,11 @@ const renderHexagon = (cx, cy, r, colors) => {
         else context.lineTo(x, y);
     }
     context.closePath();
-    useColors(colors);
+    if (highlight) {
+        useColors(highlight);
+    } else if (colors) {
+        useColors(colors);
+    }
     context.restore();
 };
 
@@ -1259,7 +1343,7 @@ const renderHexDraft = (width, height) => {
  * @param {number} width
  * @param {number} height
  */
-const renderMovementAndHints = (width, height) => {
+const renderHints = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
@@ -1283,6 +1367,7 @@ const render = () => {
     const unitWidth = canvas.width / 16;
     const unitHeight = canvas.height / 9;
 
+    /** @type {Record<string, Rectangle>} */
     const layout = {
         /** @type {Rectangle} */
         draft: {
@@ -1306,7 +1391,7 @@ const render = () => {
             height: unitHeight * 5
         },
         /** @type {Rectangle} */
-        header: {
+        movement: {
             x: unitWidth * 13,
             y: unitHeight * 2,
             width: unitWidth * 3,
@@ -1326,17 +1411,17 @@ const render = () => {
 
     const tileSize = Math.min(128, Math.floor(Math.min(canvas.width / cols, canvas.height / rows)));
 
-    context.fillStyle = "#1D1D1D";
+    context.fillStyle = CLEAR_COLOR;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     const offsetX = Math.floor((canvas.width - tileSize * cols) / 2);
     const offsetY = Math.floor((canvas.height - tileSize * rows) / 2);
 
-    renderInLayout(layout.header, renderGoal);
+    renderInLayout(layout.draft, renderHexDraft);
     renderInLayout(layout.resources, renderResources);
     renderInLayout(layout.grid, renderHexGrid);
-    renderInLayout(layout.draft, renderHexDraft);
-    renderInLayout(layout.footer, renderMovementAndHints);
+    renderInLayout(layout.movement, renderMovement);
+    renderInLayout(layout.footer, renderHints);
 
     if (DEBUG_MODE) {
         context.strokeStyle = CSS_COLOR_NAMES.Pink;
@@ -1352,15 +1437,34 @@ const render = () => {
         }
     }
 
-    if (gameState.currentState + "sdf" === "draft") {
+    if (gameState.lastEffect !== "noop") {
+        context.textAlign = 'right';
+        context.textBaseline = 'middle';
+        context.fillStyle = "white";
+        context.font = "25px Consolas";
+        context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
+    }
+};
 
-    } else {
-        if (gameState.lastEffect !== "noop") {
-            context.textAlign = 'right';
-            context.textBaseline = 'middle';
-            context.fillStyle = "white";
-            context.font = "25px Consolas";
-            context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
+/**
+ *
+ * @param {MouseEvent} event
+ */
+const handleMove = (event) => {
+    gameState.mouseX = event.offsetX;
+    gameState.mouseY = event.offsetY;
+};
+
+/**
+ *
+ * @param {MouseEvent} event
+ */
+const handleClick = (event) => {
+    if (gameState.currentState === "move") {
+        if (valid({row: gameState.mouseGridRow, col: gameState.mouseGridCol})) {
+            console.log(`Move [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
+        } else {
+            console.log(`Cannot move to [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
         }
     }
 };
@@ -1457,9 +1561,11 @@ const gameLoop = (timestamp) => {
 
 const run = async () => {
     document.addEventListener("keydown", handleInput);
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mousedown", handleClick);
     newGame();
 
     gameLoop(0);
 };
 
-run();
+run().then();
