@@ -39,11 +39,9 @@ let DEBUG_MODE = false;
 const DIRECTION_VALUES = [
     "NORTH",
     "NORTH_EAST",
-    //"EAST",
     "SOUTH_EAST",
     "SOUTH",
     "SOUTH_WEST",
-    //"WEST",
     "NORTH_WEST"];
 
 /**
@@ -261,11 +259,9 @@ class Room {
         this.hallways = {
             NORTH: {status: "unknown", enabled: true},
             NORTH_EAST: {status: "unknown", enabled: true},
-            //EAST: {status: "unknown", enabled: true},
             SOUTH_EAST: {status: "unknown", enabled: true},
             SOUTH: {status: "unknown", enabled: true},
             SOUTH_WEST: {status: "unknown", enabled: true},
-            // WEST: {status: "unknown", enabled: true},
             NORTH_WEST: {status: "unknown", enabled: true},
         };
         this.revealed = false;
@@ -620,11 +616,9 @@ const randomRoomPurpose = () => {
 const opposite = (direction) => {
     if (direction === "NORTH") return "SOUTH";
     if (direction === "NORTH_EAST") return "SOUTH_WEST";
-    //if (direction === "EAST") return "WEST";
     if (direction === "SOUTH_EAST") return "NORTH_WEST";
     if (direction === "SOUTH") return "NORTH";
     if (direction === "SOUTH_WEST") return "NORTH_EAST";
-    //if (direction === "WEST") return "EAST";
     if (direction === "NORTH_WEST") return "SOUTH_EAST";
     throw new Error();
 }
@@ -645,11 +639,9 @@ const newGame = () => {
     at(gameState.player).hallways = {
         NORTH: {status: "unknown", enabled: true},
         NORTH_EAST: {status: "unknown", enabled: true},
-        //EAST: {status: "unknown", enabled: true},
         SOUTH_EAST: {status: "unknown", enabled: true},
         SOUTH: {status: "unknown", enabled: true},
         SOUTH_WEST: {status: "blocked", enabled: true},
-        //WEST: {status: "blocked", enabled: true},
         NORTH_WEST: {status: "blocked", enabled: true},
     };
     gameState.exit = {row: 2, col: 12};
@@ -662,11 +654,9 @@ const newGame = () => {
     at(gameState.exit).hallways = {
         NORTH: {status: "open", enabled: true},
         NORTH_EAST: {status: "unknown", enabled: true},
-        //EAST: {status: "unknown", enabled: true},
         SOUTH_EAST: {status: "unknown", enabled: true},
         SOUTH: {status: "open", enabled: true},
         SOUTH_WEST: {status: "open", enabled: true},
-        //WEST: {status: "open", enabled: true},
         NORTH_WEST: {status: "open", enabled: true},
     };
     gameState.isRunning = true;
