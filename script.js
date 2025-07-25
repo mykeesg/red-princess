@@ -1,5 +1,5 @@
 // @ts-check
-// noinspection UnnecessaryLocalVariableJS
+// noinspection UnnecessaryLocalVariableJS, UnnecessaryReturnStatementJS
 
 let DEBUG_MODE = false;
 
@@ -64,6 +64,16 @@ let DEBUG_MODE = false;
  */
 
 /**
+ * Events related to room activities
+ * @typedef {"enter"|"exit"|"use"} RoomEvent
+ */
+
+/**
+ * What can be found in a room
+ * @typedef {"keys"|"lock"|"gems"|"steps"} Item
+ */
+
+/**
  * Direction of movement on the grid
  * @typedef {
  * "NORTH" |
@@ -75,6 +85,24 @@ let DEBUG_MODE = false;
  * } Direction
  */
 
+/**
+ * @typedef {"spiral" | "diamond" | "loop" | "bright" | "circle" | "square"} Symbol
+ */
+
+
+/**
+ * @typedef {"target" | "star" | "slash" | "paint" | "egg" | "grid"} AltSymbol
+ */
+
+/**
+ * Rectangle drawn on the canvas.
+ * @typedef {Object} PuzzlePiece
+ * @property {Symbol} innerSymbol - The symbol in the middle of the puzzle
+ * @property {AltSymbol} outerSymbol - The symbol being run around the inner sections
+ * @property {string} fillColor - The main color of the hexagon
+ * @property {"straight" | "wavy" | "dotted" | "dashed"} lineType - The line type coming from the center
+ */
+
 /** @type {Direction[]} */
 const DIRECTION_VALUES = [
     "NORTH",
@@ -84,14 +112,6 @@ const DIRECTION_VALUES = [
     "SOUTH_WEST",
     "NORTH_WEST"];
 
-/**
- * Events related to room activities
- * @typedef {"enter"|"exit"|"use"} RoomEvent
- */
-/**
- * What can be found in a room
- * @typedef {"keys"|"lock"|"gems"|"steps"} Item
- */
 
 /** @type {Record<Item, string>} */
 const ItemTexts = {
@@ -101,7 +121,122 @@ const ItemTexts = {
     "gems": "💎",
 };
 
-/** @type {Record<string, Effect>} */
+
+/** @type {Record<Symbol, string>} */
+const SymbolTexts = {
+    "spiral": "🌀",
+    "diamond": "🔶",
+    "loop": "➰",
+    "bright": "🔆",
+    "circle": "🔴",
+    "square": "🟩",
+};
+
+
+/** @type {Record<AltSymbol, string>} */
+const AltSymbolTexts = {
+    "target": "🎯",
+    "star": "✴️",
+    "slash": "〰️",
+    "paint": "🎨",
+    "egg": "🥚",
+    "grid": "🔳",
+};
+
+
+class SeededRNG {
+    /**
+     * The current seed used by the generator
+     * @type {number}
+     */
+    #seed;
+
+    constructor(seed = 0) {
+        this.setSeed(seed);
+    }
+
+    setSeed(seed) {
+        this.seed = seed ?? Math.floor(Math.random() * Math.pow(2, 31)) + 1;
+    }
+
+    float() {
+        this.seed ^= this.seed << 13;
+        this.seed ^= this.seed >> 17;
+        this.seed ^= this.seed << 5;
+        return (this.seed >>> 0) / 0xFFFFFFFF;
+    }
+
+    int32() {
+        this.seed ^= this.seed << 13;
+        this.seed ^= this.seed >> 17;
+        this.seed ^= this.seed << 5;
+        return this.seed | 0;
+    }
+
+    getSeed() {
+        return this.seed;
+    }
+}
+
+const rng = new SeededRNG(Date.now());
+
+/**
+ * Sets the random seed.
+ * @param {number} seed
+ */
+const setSeed = (seed) => rng.setSeed(seed);
+
+/**
+ * Returns a random float between 0 (inclusive) and 1 (exclusive).
+ * @returns {number}
+ */
+const randomFloat = () => rng.float();
+
+/**
+ * Returns a random integer between min (inclusive) and max (exclusive).
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+const randomRange = (min, max) => Math.floor(randomFloat() * (max - min)) + min;
+
+/**
+ * Returns a random 32-bit integer or one bounded between 0 and the specified value.
+ * @param {number} bound
+ * @returns {number}
+ */
+const randomInt32 = (bound = 0) => bound ? randomRange(0, bound) : rng.int32();
+
+/**
+ * Returns a random boolean.
+ * @returns {boolean}
+ */
+const randomBool = () => randomInt32() % 2 === 0;
+
+/**
+ * Picks a random element from an array.
+ * @template T
+ * @param {Array<T>} items
+ * @returns {T}
+ */
+const randomElement = items => items[randomInt32(items.length)];
+
+/**
+ * Generates a random hex color string (e.g., #A3F2D1).
+ * @returns {string}
+ */
+const randomHexColor = () => {
+    const letters = "0123456789ABCDEF";
+    let color = "#";
+    for (let i = 0; i < 6; i++) {
+        color += randomElement([...letters]);
+    }
+    return color;
+};
+
+/** @typedef { "noop" | "taxes" | "garden" | "shop" | "extraSteps" | "money" | "extraKey" | "exit" } EffectType */
+
+/** @type {Record<EffectType, Effect>} */
 const Effects = {
     "extraSteps":
         {
@@ -184,15 +319,15 @@ class Tween {
      * from: number,
      * to: number,
      * duration: number,
-     * ease: (value: number) => number,
-     * onUpdate: (value: number) => void,
-     * onComplete: () => void,
-     * loop: boolean,
-     * reverse: boolean,
-     * type: string
+     * ease?: (value: number) => number,
+     * onUpdate?: (value: number) => void,
+     * onComplete?: () => void,
+     * loop?: boolean,
+     * reverse?: boolean,
+     * type?: string
      * }} values
      */
-    constructor({from, to, duration, ease = t => t, onUpdate, onComplete, loop = false, reverse = false, type}) {
+    constructor({from, to, duration, ease = t => t, onUpdate, onComplete, loop = false, reverse = false, type = ""}) {
         this.from = from;
         this.to = to;
         this.duration = duration;
@@ -509,7 +644,7 @@ const CSS_COLOR_NAMES = {
     YellowGreen: '#9ACD32',
 };
 
-const randomColor = () => Object.values(CSS_COLOR_NAMES)[Math.floor(Math.random() * Object.values(CSS_COLOR_NAMES).length)];
+const randomColor = () => randomElement(Object.values(CSS_COLOR_NAMES));
 
 /**
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
@@ -535,6 +670,7 @@ const useColors = (colors) => {
  */
 const clamp = (value, lower, upper) => value < lower ? lower : value > upper ? upper : value;
 
+/** @type {Record<EffectType | "draft", string>} */
 const ROOM_COLORS = {
     "noop": "#AF6C31",
     "taxes": "#AE0000",
@@ -644,7 +780,7 @@ const tileTowards = (position, direction) => {
 const randomRoomPurpose = () => {
     const effects = Object.values(Effects);
     const sum = effects.reduce((acc, r) => acc + r.rarity, 0);
-    let roll = Math.random() * sum;
+    let roll = randomFloat() * sum;
 
     for (const r of Object.keys(Effects)) {
         roll -= Effects[r].rarity;
@@ -705,6 +841,7 @@ const newGame = () => {
     };
     gameState.isRunning = true;
     gameState.lastEffect = "";
+    gameState.lastTimeStamp = 0;
     gameState.currentState = "move";
     gameState.draft = {
         index: 0,
@@ -774,7 +911,7 @@ const generateHallway = (position, direction, draftRoom) => {
     const chance = 0.4;
     const neighborPos = tileTowards(position, direction);
     if (valid(neighborPos)) {
-        if (Math.random() < chance) {
+        if (randomFloat() < chance) {
             const neighbor = at(neighborPos);
             if (hidden(neighborPos)) {
                 draftRoom.hallways[direction].enabled = true;
@@ -820,7 +957,7 @@ const generateDraftRoom = (index, direction) => {
 
     room.hallways[opposite(direction)].enabled = true;
     room.hallways[opposite(direction)].status = "open";
-    room.needsKey = purpose !== "extraKey" && Math.random() < 0.5;
+    room.needsKey = purpose !== "extraKey" && randomBool();
 
 }
 
@@ -991,7 +1128,7 @@ const renderHexRoom = (cx, cy, r, room, borders = false) => {
             renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
         });
         renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
-    } else {
+    } else if (DEBUG_MODE) {
         renderHexagon(cx, cy, r, undefined,
             {
                 fill: CLEAR_COLOR,
@@ -1133,6 +1270,138 @@ const renderMovement = (width, height) => {
 
 /**
  *
+ * @param {number} startX
+ * @param {number} startY
+ * @param {number} endX
+ * @param {number} endY
+ * @param {number} periods
+ * @param {number} amplitude
+ */
+const renderWavyLine = (startX, startY, endX, endY, periods = 5, amplitude = 5) => {
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const length = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+
+    context.save();
+    context.translate(startX, startY);
+    context.rotate(angle);
+    context.beginPath();
+    context.lineWidth = 2;
+
+    for (let i = 0; i <= length; i++) {
+        const waveY = Math.sin((i / length) * 2 * Math.PI * periods) * amplitude;
+        const px = i;
+        const py = waveY;
+        if (i === 0) context.moveTo(px, py);
+        else context.lineTo(px, py);
+    }
+    context.stroke();
+    context.restore();
+};
+
+/** @type {Map<string, PuzzlePiece>} */
+const randomSymbolCache = new Map();
+
+/**
+ *
+ * @param {string} coords
+ * @param {string[]} symbols
+ * @param {string[]} altSymbols
+ * @return {PuzzlePiece}
+ */
+const calculateIfAbsent = (coords, symbols, altSymbols) => {
+    /** {@type {PuzzlePiece} */
+    let value = randomSymbolCache.get(coords);
+    if (!value) {
+        const lineTypes = ["straight", "wavy", "dotted", "dashed"];
+        value = {
+            //fillColor: randomColor(),
+            fillColor: randomElement(Object.values(ROOM_COLORS)),
+            innerSymbol: randomElement(symbols),
+            outerSymbol: randomElement(altSymbols),
+            lineType: randomElement(lineTypes),
+        };
+        randomSymbolCache.set(coords, value);
+    }
+    return value;
+}
+
+/**
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ */
+const renderPuzzle = (cx, cy, r) => {
+
+    const lineLength = r / 8;
+    const spaceLength = r / 16;
+    context.lineCap = 'round';
+    const symbols = Object.values(SymbolTexts);
+    const altSymbols = Object.values(AltSymbolTexts);
+
+    const coords = `[${cx};${cy}]`;
+    const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
+
+    renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
+
+    context.setLineDash([lineLength, spaceLength]);
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i + 30);
+        const x = cx + 0.6 * r * Math.cos(angle);
+        const y = cy + 0.6 * r * Math.sin(angle);
+        context.font = "20px monospace";
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillStyle = "white";
+        context.fillText(`${randomSymbols.outerSymbol}`, x, y);
+    }
+
+    context.setLineDash([]);
+    context.strokeStyle = "white";
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i);
+
+        const startX = cx + 20 * Math.cos(angle);
+        const startY = cy + 20 * Math.sin(angle);
+        const endX = cx + r * Math.cos(angle);
+        const endY = cy + r * Math.sin(angle);
+
+        if (randomSymbols.lineType === "wavy") {
+            renderWavyLine(startX, startY, endX, endY);
+        } else {
+            switch (randomSymbols.lineType) {
+                case "straight": {
+                    context.lineWidth = 2;
+                    context.setLineDash([]);
+                    break;
+                }
+                case "dotted": {
+                    context.setLineDash([r / 30]);
+                    break;
+                }
+                case "dashed": {
+                    context.setLineDash([r / 5]);
+                    break;
+                }
+            }
+            context.beginPath();
+            context.moveTo(startX, startY);
+            context.lineTo(endX, endY);
+            context.stroke();
+        }
+    }
+    context.setLineDash([]);
+    renderCircle(cx, cy, 15, {fill: "white"});
+    context.font = "20px monospace";
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    //const symbol = symbols[4];
+    context.fillText(`${randomSymbols.innerSymbol}`, cx, cy);
+};
+
+/**
+ *
  * @param {number} width
  * @param {number} height
  */
@@ -1153,6 +1422,14 @@ const renderResources = (width, height) => {
     texts.forEach((text, idx) => {
         context.fillText(text, width / 2.5, (idx + 1) * 30 + 10);
     });
+
+    const unitWidth = width / 2;
+    const unitHeight = height / 5;
+
+    const cx = unitWidth;
+    const cy = 3 * unitHeight;
+    const r = unitWidth * 0.5;
+    renderPuzzle(cx, cy, r);
 };
 
 /**
@@ -1178,6 +1455,7 @@ const renderHexGrid = (width, height) => {
             const offsetY = ((col % 2) + 1) * rowOffset;
             const cy = (row * hexHeight) + offsetY;
             renderHexRoom(cx, cy, r, gameState.grid[row][col]);
+            //renderPuzzle(cx, cy, r);
             if (row === gameState.player.row && col === gameState.player.col) {
                 //player, TODO animation
                 renderCircle(cx, cy, 10, {fill: PLAYER_COLOR});
@@ -1469,76 +1747,65 @@ const handleClick = (event) => {
     }
 };
 
+/** @type {Object<string, Function>} */
+const globalShortcuts = {
+    r: () => newGame(),
+    h: () => (DEBUG_MODE = !DEBUG_MODE),
+    g: () => addResourcesItem("gems", 5),
+    k: () => addResourcesItem("keys", 5)
+};
+
+/** @type {Record<string, Function>} */
+const moveControls = {
+    w: () => updatePlayerPosition("NORTH"),
+    e: () => updatePlayerPosition("NORTH_EAST"),
+    d: () => updatePlayerPosition("SOUTH_EAST"),
+    s: () => updatePlayerPosition("SOUTH"),
+    a: () => updatePlayerPosition("SOUTH_WEST"),
+    q: () => updatePlayerPosition("NORTH_WEST")
+};
+
+/** @type {Record<string, Function>} */
+const draftControls = {
+    d: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
+    ArrowRight: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
+    a: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
+    ArrowLeft: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
+    " ": () => placeRoom(),
+    Enter: () => placeRoom(),
+    r: () => {
+        if (getResourcesItemCount("gems") >= 2) {
+            removeResourcesItem("gems", 2);
+            refreshDrafts();
+        }
+    }
+};
+
 /**
- *
+ * Handles keyboard input based on the current game state.
  * @param {KeyboardEvent} event
  */
 const handleInput = (event) => {
-    if (gameState.currentState === "move") {
-        switch (event.key) {
-            case "w":
-                updatePlayerPosition("NORTH");
-                break;
-            case "e":
-                updatePlayerPosition("NORTH_EAST");
-                break;
-            case "d":
-                updatePlayerPosition("SOUTH_EAST");
-                break;
-            case "s":
-                updatePlayerPosition("SOUTH");
-                break;
-            case "a":
-                updatePlayerPosition("SOUTH_WEST");
-                break;
-            case "q":
-                updatePlayerPosition("NORTH_WEST");
-                break;
-            case "r":
-                newGame();
-                break;
-            case "h":
-                DEBUG_MODE = !DEBUG_MODE;
-                break;
-            case "g":
-                addResourcesItem("gems", 5);
-                break;
-            case "k":
-                addResourcesItem("keys", 5);
-                break;
-        }
-    } else {
-        switch (event.key) {
-            case "ArrowRight":
-            case "d":
-                gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1);
-                break;
-            case "ArrowLeft":
-            case "a":
-                gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1);
-                break;
-            case " ":
-            case "Enter":
-                placeRoom();
-                break;
-            case "r":
-                if (getResourcesItemCount("gems") >= 2) {
-                    removeResourcesItem("gems", 2);
-                    refreshDrafts();
-                }
-                break;
-            case "h":
-                DEBUG_MODE = !DEBUG_MODE;
-                break;
-            case "g":
-                addResourcesItem("gems", 5);
-                break;
-            case "k":
-                addResourcesItem("keys", 5);
-                break;
-        }
+    const key = event.key;
+    const mode = gameState.currentState;
+
+    if (globalShortcuts[key]) {
+        globalShortcuts[key]();
+        return;
     }
-}
+
+    if (mode === "move" && moveControls[key]) {
+        moveControls[key]();
+        return;
+    }
+
+    if (mode === "draft" && draftControls[key]) {
+        draftControls[key]();
+        return;
+    }
+};
+
+
 let lastFrameTime = performance.now();
 /**
  *
@@ -1548,7 +1815,7 @@ const gameLoop = (timestamp) => {
     const delta = timestamp - lastFrameTime;
     const fps = 1000 / delta;
     lastFrameTime = timestamp;
-    gameState.lastTimestamp = timestamp;
+    gameState.lastTimeStamp = timestamp;
     update(timestamp);
     render();
     context.textAlign = 'left';
@@ -1557,6 +1824,10 @@ const gameLoop = (timestamp) => {
     context.font = "25px monospace";
     context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
     requestAnimationFrame(gameLoop);
+    if (gameState.lastTimeStamp !== 0 && fps < 10) {
+        cancelAnimationFrame(gameLoop);
+        throw new Error(`FPS too low (${fps}), something is definitely wrong. State :: ${JSON.stringify(gameState)}`);
+    }
 }
 
 const run = async () => {
@@ -1568,4 +1839,4 @@ const run = async () => {
     gameLoop(0);
 };
 
-run().then();
+run().then(() => console.log("Game started."));
