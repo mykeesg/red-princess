@@ -1832,10 +1832,6 @@ const gameLoop = (timestamp) => {
     context.font = "25px monospace";
     context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
     requestAnimationFrame(gameLoop);
-    if (gameState.lastTimeStamp !== 0 && fps < 10) {
-        cancelAnimationFrame(gameLoop);
-        throw new Error(`FPS too low (${fps}), something is definitely wrong. State :: ${JSON.stringify(gameState)}`);
-    }
 }
 
 const run = async () => {
