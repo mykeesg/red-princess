@@ -1,27 +1,81 @@
 // @ts-check
-// noinspection UnnecessaryLocalVariableJS
+// noinspection UnnecessaryLocalVariableJS, UnnecessaryReturnStatementJS
 
 let DEBUG_MODE = false;
 
 /**
  * A coordinate on the grid, identified by its row and column.
- * @typedef {{row: number, col: number}} Coord
- *  */
-
-/**
- * Rectangle drawn on the canvas
- * @typedef {{x: number, y: number, width: number, height: number}} Rectangle
- *  */
-
-/**
- * @typedef {{cx: number, cy: number, width: number, height:number}} Hexagon
+ * @typedef {Object} Coord
+ * @property {number} row - The row index within the grid.
+ * @property {number} col - The column index within the grid.
  */
 
 /**
- * A hallway, connecting rooms. Hallways are not necessarily present in a room, in this case they are not enabled.
- * Otherwise, depending on what's on the _other side_, their status can differ.
- * @typedef {{status: "unknown" | "open" | "blocked", enabled: boolean }} Hallway
- *  */
+ * Rectangle drawn on the canvas.
+ * @typedef {Object} Rectangle
+ * @property {number} x - The X position of the top-left corner.
+ * @property {number} y - The Y position of the top-left corner.
+ * @property {number} width - Width of the rectangle.
+ * @property {number} height - Height of the rectangle.
+ */
+
+/**
+ * Represents a hexagon's geometry and position on the canvas.
+ * @typedef {Object} Hexagon
+ * @property {number} cx - The X coordinate of the hexagon's center.
+ * @property {number} cy - The Y coordinate of the hexagon's center.
+ * @property {number} width - Horizontal span (distance between opposite sides).
+ * @property {number} height - Vertical span (distance between top and bottom).
+ */
+
+/**
+ * A hallway connecting rooms. Hallways may not always be present.
+ * If enabled, their status reflects what's on the other side.
+ * @typedef {Object} Hallway
+ * @property {"unknown" | "open" | "blocked"} status - Current state of the hallway.
+ * @property {boolean} enabled - Whether the hallway is active (can be used).
+ */
+
+/**
+ * A room effect triggered by interaction such as entering, leaving, or activating the room.
+ * @typedef {Object} Effect
+ * @property {() => void} invoke - Function to trigger the effect.
+ * @property {string} description - Text describing the effect’s behavior.
+ * @property {string} triggerText - UI message shown when the effect is activated.
+ * @property {number} triggerLimit - Max number of times this effect can be triggered.
+ * @property {number} rarity - Numeric value indicating how rare this effect is.
+ */
+
+/**
+ * Represents the active state of keyboard modifier keys.
+ * @typedef {Object} ModifierState
+ * @property {boolean} shift - Whether the Shift key is currently held.
+ * @property {boolean} ctrl - Whether the Control key is currently held.
+ * @property {boolean} alt - Whether the Alt key is currently held.
+ * @property {boolean} meta - Whether the Meta key is currently held (e.g., Cmd on macOS or Windows key).
+ */
+
+/**
+ * Represents the current state of the mouse.
+ * @typedef {Object} MouseState
+ * @property {number} x - The current mouse X position (relative to canvas).
+ * @property {number} y - The current mouse Y position.
+ * @property {Set<number>} buttons - A set of pressed mouse button codes (0 = left, 1 = middle, 2 = right).
+ */
+
+/**
+ * Events related to room activities
+ * @typedef {"enter"|"exit"|"use"} RoomEvent
+ */
+
+/**
+ * What state the game is in
+ * @typedef {"move"|"draft"} GameState
+ */
+/**
+ * What can be found in a room
+ * @typedef {"keys"|"lock"|"gems"|"steps"} Item
+ */
 
 /**
  * Direction of movement on the grid
@@ -35,6 +89,24 @@ let DEBUG_MODE = false;
  * } Direction
  */
 
+/**
+ * @typedef {"spiral" | "diamond" | "loop" | "bright" | "circle" | "square"} Symbol
+ */
+
+
+/**
+ * @typedef {"target" | "star" | "slash" | "paint" | "egg" | "grid"} AltSymbol
+ */
+
+/**
+ * Rectangle drawn on the canvas.
+ * @typedef {Object} PuzzlePiece
+ * @property {Symbol} innerSymbol - The symbol in the middle of the puzzle
+ * @property {AltSymbol} outerSymbol - The symbol being run around the inner sections
+ * @property {string} fillColor - The main color of the hexagon
+ * @property {"straight" | "wavy" | "dotted" | "dashed"} lineType - The line type coming from the center
+ */
+
 /** @type {Direction[]} */
 const DIRECTION_VALUES = [
     "NORTH",
@@ -44,14 +116,6 @@ const DIRECTION_VALUES = [
     "SOUTH_WEST",
     "NORTH_WEST"];
 
-/**
- * Events related to room activities
- * @typedef {"enter"|"exit"|"use"} RoomEvent
- */
-/**
- * What can be found in a room
- * @typedef {"keys"|"lock"|"gems"|"steps"} Item
- */
 
 /** @type {Record<Item, string>} */
 const ItemTexts = {
@@ -61,16 +125,136 @@ const ItemTexts = {
     "gems": "💎",
 };
 
+
+/** @type {Record<Symbol, string>} */
+const SymbolTexts = {
+    "spiral": "🌀",
+    "diamond": "🔶",
+    "loop": "➰",
+    "bright": "🔆",
+    "circle": "🔴",
+    "square": "🟩",
+};
+
+
+/** @type {Record<AltSymbol, string>} */
+const AltSymbolTexts = {
+    "target": "🎯",
+    "star": "✴️",
+    "slash": "〰️",
+    "paint": "🎨",
+    "egg": "🥚",
+    "grid": "🔳",
+};
+
 /**
- * A room effect, which can trigger when the player enters or leaves it, or "uses" the room.
- * Some can trigger on each invocation, some only once. These are bound to the effects, not the rooms.
- * @typedef {{ invoke: () => void, description: string, triggerText: string, triggerLimit: number, rarity: number }} Effect
- *  */
-/** @type {Record<string, Effect>} */
+ * Determines whether a point (x, y) lies inside a given rectangular area.
+ *
+ * @param {number} x - The horizontal position of the point.
+ * @param {number} y - The vertical position of the point.
+ * @param {Rectangle} rect - The rectangle to test against.
+ * @returns {boolean} - Returns true if the point is within the bounds of the rectangle.
+ */
+const isInside = (x, y, rect) =>
+    rect.x <= x && rect.y <= y && x <= rect.x + rect.width && y <= rect.y + rect.height;
+
+class SeededRNG {
+    /**
+     * The current seed used by the generator
+     * @type {number}
+     */
+    #seed;
+
+    constructor(seed = 0) {
+        this.setSeed(seed);
+    }
+
+    setSeed(seed) {
+        this.#seed = seed ?? Math.floor(Math.random() * Math.pow(2, 31)) + 1;
+    }
+
+    float() {
+        this.#seed ^= this.#seed << 13;
+        this.#seed ^= this.#seed >> 17;
+        this.#seed ^= this.#seed << 5;
+        return (this.#seed >>> 0) / 0xFFFFFFFF;
+    }
+
+    int32() {
+        this.#seed ^= this.#seed << 13;
+        this.#seed ^= this.#seed >> 17;
+        this.#seed ^= this.#seed << 5;
+        return this.#seed | 0;
+    }
+
+    get seed() {
+        return this.#seed;
+    }
+}
+
+const rng = new SeededRNG(Date.now());
+
+/**
+ * Sets the random seed.
+ * @param {number} seed
+ */
+const setSeed = (seed) => rng.setSeed(seed);
+
+/**
+ * Returns a random float between 0 (inclusive) and 1 (exclusive).
+ * @returns {number}
+ */
+const randomFloat = () => rng.float();
+
+/**
+ * Returns a random integer between min (inclusive) and max (exclusive).
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+const randomRange = (min, max) => Math.floor(randomFloat() * (max - min)) + min;
+
+/**
+ * Returns a random 32-bit integer or one bounded between 0 and the specified value.
+ * @param {number} bound
+ * @returns {number}
+ */
+const randomInt32 = (bound = 0) => bound ? randomRange(0, bound) : rng.int32();
+
+/**
+ * Returns a random boolean.
+ * @returns {boolean}
+ */
+const randomBool = () => randomInt32() % 2 === 0;
+
+/**
+ * Picks a random element from an array.
+ * @template T
+ * @param {Array<T>} items
+ * @returns {T}
+ */
+const randomElement = items => items[randomInt32(items.length)];
+
+/**
+ * Generates a random hex color string (e.g., #A3F2D1).
+ * @returns {string}
+ */
+const randomHexColor = () => {
+    const letters = "0123456789ABCDEF";
+    let color = "#";
+    for (let i = 0; i < 6; i++) {
+        color += randomElement([...letters]);
+    }
+    return color;
+};
+
+/** @typedef { "noop" | "taxes" | "garden" | "shop" | "extraSteps" | "money" | "extraKey" | "exit" } EffectType */
+
+/** @type {Record<EffectType, Effect>} */
 const Effects = {
     "extraSteps":
         {
-            invoke: () => addResourcesItem("steps", 2),
+            invoke: () => gameState.addResource("steps", 2),
             description: "Take a rest.",
             triggerText: "You have gained 2 extra steps.",
             triggerLimit: -1,
@@ -78,7 +262,7 @@ const Effects = {
         },
     "extraKey":
         {
-            invoke: () => addResourcesItem("keys"),
+            invoke: () => gameState.addResource("keys"),
             description: "Alohomora.",
             triggerText: "You have found a key.",
             triggerLimit: 1,
@@ -86,7 +270,7 @@ const Effects = {
         },
     "money":
         {
-            invoke: () => addResourcesItem("gems"),
+            invoke: () => gameState.addResource("gems"),
             description: "What's that spark in the corner?",
             triggerText: "You have found a gem.",
             triggerLimit: 1,
@@ -94,7 +278,7 @@ const Effects = {
         },
     "taxes":
         {
-            invoke: () => removeResourcesItem("gems"),
+            invoke: () => gameState.removeResource("gems"),
             description: "Takes a toll on you.",
             triggerText: `You have to pay taxes: ${ItemTexts.gems}`,
             triggerLimit: -1,
@@ -102,7 +286,7 @@ const Effects = {
         },
     "garden":
         {
-            invoke: () => setResourcesItem("steps", 41),
+            invoke: () => gameState.setResource("steps", 41),
             description: "Like starting again.",
             triggerText: "Your steps have been reset.",
             triggerLimit: -1,
@@ -111,9 +295,9 @@ const Effects = {
     "shop":
         {
             invoke: () => {
-                if (getResourcesItemCount("gems") >= 5) {
-                    addResourcesItem("keys");
-                    removeResourcesItem("gems", 5);
+                if (gameState.getResource("gems") >= 5) {
+                    gameState.addResource("keys");
+                    gameState.removeResource("gems", 5);
                 }
             },
             description: "Buy your passage.",
@@ -124,7 +308,7 @@ const Effects = {
     "exit":
         {
             invoke: () => {
-                gameState.isRunning = false;
+                gameState.pause();
             },
             description: "",
             triggerText: "You have won!",
@@ -149,15 +333,15 @@ class Tween {
      * from: number,
      * to: number,
      * duration: number,
-     * ease: (value: number) => number,
-     * onUpdate: (value: number) => void,
-     * onComplete: () => void,
-     * loop: boolean,
-     * reverse: boolean,
-     * type: string
+     * ease?: (value: number) => number,
+     * onUpdate?: (value: number) => void,
+     * onComplete?: () => void,
+     * loop?: boolean,
+     * reverse?: boolean,
+     * type?: string
      * }} values
      */
-    constructor({from, to, duration, ease = t => t, onUpdate, onComplete, loop = false, reverse = false, type}) {
+    constructor({from, to, duration, ease = t => t, onUpdate, onComplete, loop = false, reverse = false, type = ""}) {
         this.from = from;
         this.to = to;
         this.duration = duration;
@@ -311,6 +495,16 @@ class Room {
         return new Room(JSON.parse(JSON.stringify(this)));
     }
 }
+
+/**
+ * Represents a draft state used for room placement and selection.
+ * @typedef {Object} Draft
+ * @property {number} index - The currently selected room index in the draft.
+ * @property {Coord} position - The grid coordinate where the draft is positioned.
+ * @property {Direction} direction - Direction of placement for the current room.
+ * @property {Room[]} options - Array of room options available in the draft.
+ */
+
 
 /** @type {HTMLCanvasElement} */
 // @ts-ignore
@@ -474,7 +668,7 @@ const CSS_COLOR_NAMES = {
     YellowGreen: '#9ACD32',
 };
 
-const randomColor = () => Object.values(CSS_COLOR_NAMES)[Math.floor(Math.random() * Object.values(CSS_COLOR_NAMES).length)];
+const randomColor = () => randomElement(Object.values(CSS_COLOR_NAMES));
 
 /**
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
@@ -500,6 +694,7 @@ const useColors = (colors) => {
  */
 const clamp = (value, lower, upper) => value < lower ? lower : value > upper ? upper : value;
 
+/** @type {Record<EffectType | "draft", string>} */
 const ROOM_COLORS = {
     "noop": "#AF6C31",
     "taxes": "#AE0000",
@@ -513,55 +708,454 @@ const ROOM_COLORS = {
 };
 
 const PLAYER_COLOR = CSS_COLOR_NAMES.Black;
+const CLEAR_COLOR = "#1D1D1D";
 
-const gameState = {
-    /** @type {Room[][]} */
-    grid: [],
-    /** @type {number} */
-    rows: 5,
-    /** @type {number} */
-    cols: 13,
-    /** @type {Coord} */
-    player: {row: 2, col: 0},
-    /** @type {Coord} */
-    exit: {row: 2, col: 9},
-    /** @type {boolean} */
-    isRunning: true,
-    /** @type {string} */
-    lastEffect: "noop",
-    /** @type {"move"|"draft"} */
-    currentState: "move",
-    /** @type {{index: number, position: Coord, direction: Direction, options: Room[] }} */
-    draft: {
-        index: 0,
-        direction: "NORTH",
-        position: {
-            row: 0,
-            col: 0,
-        },
-        options: []
-    },
-    /** @type {Partial<Record<Item, number>>} */
-    resources: {
-        keys: 0,
-        gems: 0,
-        steps: 0
-    },
-    /** @type {number} */
-    lastTimeStamp: 0,
-};
+class Game {
+    /**
+     * Number of rows in the grid.
+     * @type {number}
+     */
+    #rows;
 
-/** @param {Coord} coord */
-const valid = (coord) => coord.row >= 0 && coord.row < gameState.rows && coord.col >= 0 && coord.col < gameState.cols;
+    /**
+     * Number of columns in the grid.
+     * @type {number}
+     */
+    #cols;
+
+    /**
+     * 2D array representing the hexagonal grid layout of rooms.
+     * @type {Room[][]}
+     */
+    #grid;
+
+    /**
+     * Current player position on the grid.
+     * @type {Coord}
+     */
+    #player;
+
+    /**
+     * Exit location in the grid.
+     * @type {Coord}
+     */
+    #exit;
+
+    /**
+     * Current gameplay state.
+     * @type {GameState}
+     */
+    #currentState;
+
+    /**
+     * Collection of resource types and their quantities.
+     * Keys are item names, values are counts.
+     * @type {Partial<Record<Item, number>>}
+     */
+    #resources;
+
+    /**
+     * Whether the game loop is currently active.
+     * @type {boolean}
+     */
+    #running;
+
+    /**
+     * Most recently triggered effect type.
+     * @type {EffectType}
+     */
+    #lastEffect;
+
+    /**
+     * Timestamp from last game tick or update.
+     * @type {number}
+     */
+    #lastTimeStamp;
+
+    /**
+     * Draft pool used for room placement.
+     * Values are randomly generated upon entering draft mode.
+     * @type {Draft}
+     */
+    #draft;
+
+    /**
+     * Mouse X position relative to the canvas.
+     * @type {number}
+     */
+    mouseX;
+
+    /**
+     * Mouse Y position relative to the canvas.
+     * @type {number}
+     */
+    mouseY;
+
+    /**
+     * Grid row index beneath the mouse pointer.
+     * @type {number}
+     */
+    mouseGridRow;
+
+    /**
+     * Grid column index beneath the mouse pointer.
+     * @type {number}
+     */
+    mouseGridCol;
+
+    constructor() {
+        this.newGame();
+    }
+
+    newGame() {
+        this.#rows = 5;
+        this.#cols = 13;
+
+        this.#grid = Array.from({length: this.#rows},
+            () => Array.from({length: this.#cols},
+                () => (new Room()))
+        );
+
+        this.#player = {row: 2, col: 0};
+        this.atCoord(this.player).events = {
+            enter: "noop",
+            exit: "noop",
+            use: "noop",
+        };
+        this.atCoord(this.player).revealed = true;
+        this.atCoord(this.player).hallways = {
+            NORTH: {status: "unknown", enabled: true},
+            NORTH_EAST: {status: "unknown", enabled: true},
+            SOUTH_EAST: {status: "unknown", enabled: true},
+            SOUTH: {status: "unknown", enabled: true},
+            SOUTH_WEST: {status: "blocked", enabled: true},
+            NORTH_WEST: {status: "blocked", enabled: true},
+        };
+
+        this.#exit = {row: 2, col: 9};
+        this.atCoord(this.exit).events = {
+            enter: "exit",
+            exit: "noop",
+            use: "noop",
+        };
+        this.atCoord(this.exit).revealed = true;
+        this.atCoord(this.exit).hallways = {
+            NORTH: {status: "unknown", enabled: true},
+            NORTH_EAST: {status: "blocked", enabled: true},
+            SOUTH_EAST: {status: "blocked", enabled: true},
+            SOUTH: {status: "unknown", enabled: true},
+            SOUTH_WEST: {status: "unknown", enabled: true},
+            NORTH_WEST: {status: "unknown", enabled: true},
+        };
+        this.#draft = {
+            index: 0,
+            position: {
+                row: 0,
+                col: 0,
+            },
+            direction: "NORTH",
+            options: [
+                new Room(),
+                new Room(),
+                new Room(),
+            ]
+        };
+        this.#draft.options.forEach(draft => draft.revealed = true);
+
+        this.#resources = {
+            "steps": 40,
+            "keys": 1,
+            "gems": 0,
+        };
+
+        this.mouseX = -1;
+        this.mouseY = -1;
+        this.mouseGridRow = -1;
+        this.mouseGridCol = -1;
+
+        this.#lastTimeStamp = 0;
+        this.#lastEffect = "noop";
+
+        this.setState("move");
+        this.play();
+    }
+
+    get rows() {
+        return this.#rows;
+    }
+
+    get cols() {
+        return this.#cols;
+    }
+
+    get player() {
+        return this.#player;
+    }
+
+    get exit() {
+        return this.#exit;
+    }
+
+    /**
+     Moves the player to the given position.
+
+     @assumes The coord is a valid coordinate on the grid
+     @param {number} row the row number
+     @param {number} col the column number
+     * */
+    movePlayerTo(row, col) {
+        this.#player.row = row;
+        this.#player.col = col;
+    }
+
+    /**
+     * Moves the player to the given position.
+     *
+     * @assumes The coord is a valid coordinate on the grid
+     * @param {Coord} coord
+     * */
+    movePlayerToCoord(coord) {
+        this.movePlayerTo(coord.row, coord.col);
+    }
+
+    /**
+     * Returns the room at the given position.
+     * @assumes The coord is a valid coordinate on the grid
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * @return {Room} the room in the grid.
+     * */
+    at(row, col) {
+        return this.#grid[row][col];
+    }
+
+    /**
+     * Returns the room at the given position.
+     *
+     * @assumes The coord is a valid coordinate on the grid
+     * @param {Coord} coord
+     * @return {Room} the room in the grid.
+     * */
+    atCoord(coord) {
+        return this.at(coord.row, coord.col);
+    }
+
+    /**
+     *
+     * @param {number} row
+     * @param {number} col
+     * @param {Room} room
+     */
+    placeRoom(row, col, room) {
+        if (this.valid(row, col)) {
+            this.#grid[row][col] = room;
+        }
+    }
+
+    /**
+     * Returns whether the given coordinate is valid on the grid.
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * @return {boolean} true if so, false otherwise
+     * */
+    valid(row, col) {
+        return 0 <= row && row < this.#rows && 0 <= col && col < this.#cols;
+    }
+
+    /**
+     * Returns whether the given coordinate is valid on the grid.
+     *
+     * @param {Coord} coord
+     * @return {boolean} true if so, false otherwise
+     * */
+    validCoord(coord) {
+        return this.valid(coord.row, coord.col);
+    }
+
+    /**
+     * Sets the current game state
+     * @param {GameState} state
+     */
+    setState(state) {
+        this.#currentState = state;
+    }
+
+    /**
+     * Gets the current game state
+     * @return {GameState} current state
+     */
+    getState() {
+        return this.#currentState;
+    }
+
+    /**
+     * Sets whether the given room on the grid is revealed or not
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * @param {boolean} value
+     * */
+    #setRevealed(row, col, value) {
+        this.at(row, col).revealed = value;
+    }
+
+    /**
+     * Reveals the given room on the grid
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    #reveal(row, col) {
+        this.#setRevealed(row, col, true);
+    }
+
+    /**
+     * Reveals the given room on the grid
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    #hide(row, col) {
+        this.#setRevealed(row, col, false);
+    }
+
+    /**
+     * Checks whether the given room on the grid is revealed
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    isRevealed(row, col) {
+        return this.at(row, col).revealed;
+    }
+
+    /**
+     Checks whether the given room on the grid is revealed
+     *
+     * @param {Coord} coord coord
+     * */
+    isRevealedCoord(coord) {
+        return this.isRevealed(coord.row, coord.col);
+    }
+
+    /**
+     Checks whether the given room on the grid is hidden
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    isHidden(row, col) {
+        return !this.isRevealed(row, col);
+    }
+
+    /**
+     Checks whether the given room on the grid is hidden
+     *
+     * @param {Coord} coord the coordinate
+     * */
+    isHiddenCoord(coord) {
+        return this.isHidden(coord.row, coord.col);
+    }
+
+    /**
+     * Retrieves the amount of the selected item in the player resources.
+     *  @param {Item} item
+     *  */
+    getResource(item) {
+        return this.#resources[item] ?? 0;
+    }
+
+    /**
+     * Adds the selected item to the player resources.
+     *  @param {Item} item
+     *  @param {number} amount
+     *  */
+    addResource(item, amount = 1) {
+        if (!(item in this.#resources)) {
+            this.#resources[item] = 0;
+        }
+        this.#resources[item] += amount;
+    }
+
+    /**
+     * Removes the selected item from the player resources.
+     *  @param {Item} item
+     *  @param {number} amount
+     *  */
+    removeResource(item, amount = 1) {
+        if (item in this.#resources) {
+            this.#resources[item] -= amount;
+            if (this.#resources[item] < 0) {
+                this.#resources[item] = 0;
+            }
+        }
+    }
+
+    /**
+     * Sets the selected item count in the player resources.
+     *  @param {Item} item
+     *  @param {number} amount
+     *  */
+    setResource(item, amount) {
+        this.#resources[item] = amount;
+    }
+
+    /**
+     *
+     * @return {{type: Item, count: number}[]}
+     */
+    getResources() {
+        return Object.entries(this.#resources).map(([key, value]) => ({
+            /** @type {Item} */
+            type: key,
+            /** @type {number} */
+            count: value
+        }));
+    }
+
+    pause() {
+        this.#running = false;
+    }
+
+    play() {
+        this.#running = true;
+    }
+
+    get isRunning() {
+        return this.#running;
+    }
+
+    get draft() {
+        return this.#draft;
+    }
+
+    get lastTimeStamp() {
+        return this.#lastTimeStamp;
+    }
+
+    set lastTimeStamp(value) {
+        this.#lastTimeStamp = value;
+    }
+
+    get lastEffect() {
+        return this.#lastEffect;
+    }
+
+    set lastEffect(value) {
+        this.#lastEffect = value;
+    }
+}
+
+/** @type {Game} */
+const gameState = new Game();
 
 /**
  * @param {Coord} coord
  * @return {Room}
  * */
-const at = (coord) => gameState.grid[coord.row][coord.col];
-
-/** @param {Coord} coord */
-const hidden = (coord) => valid(coord) && !at(coord).revealed;
+const at = (coord) => gameState.atCoord(coord);
 
 /**
  * @param {Coord} x
@@ -570,6 +1164,7 @@ const hidden = (coord) => valid(coord) && !at(coord).revealed;
  * */
 const add = (x, y) => ({row: x.row + y.row, col: x.col + y.col});
 
+/** @type {Record<Direction, Coord>} */
 const HEX_DIRECTIONS_ODD_Q = {
     NORTH: {row: -1, col: 0},
     NORTH_EAST: {row: 0, col: +1},
@@ -579,6 +1174,7 @@ const HEX_DIRECTIONS_ODD_Q = {
     NORTH_WEST: {row: 0, col: -1},
 };
 
+/** @type {Record<Direction, Coord>} */
 const HEX_DIRECTIONS_EVEN_Q = {
     NORTH: {row: -1, col: 0},
     NORTH_EAST: {row: -1, col: +1},
@@ -593,6 +1189,7 @@ const HEX_DIRECTIONS_EVEN_Q = {
  * @return {Coord}
  * */
 const tileTowards = (position, direction) => {
+    /** @type {Coord} */
     const offset = position.col % 2 === 0 ? HEX_DIRECTIONS_EVEN_Q[direction] : HEX_DIRECTIONS_ODD_Q[direction];
     return add(position, offset);
 }
@@ -600,7 +1197,7 @@ const tileTowards = (position, direction) => {
 const randomRoomPurpose = () => {
     const effects = Object.values(Effects);
     const sum = effects.reduce((acc, r) => acc + r.rarity, 0);
-    let roll = Math.random() * sum;
+    let roll = randomFloat() * sum;
 
     for (const r of Object.keys(Effects)) {
         roll -= Effects[r].rarity;
@@ -623,104 +1220,6 @@ const opposite = (direction) => {
     throw new Error();
 }
 
-const newGame = () => {
-    gameState.grid = Array.from({length: gameState.rows},
-        () => Array.from({length: gameState.cols},
-            () => (new Room()))
-    );
-
-    gameState.player = {row: 2, col: 0};
-    at(gameState.player).events = {
-        enter: "noop",
-        exit: "noop",
-        use: "noop",
-    };
-    at(gameState.player).revealed = true;
-    at(gameState.player).hallways = {
-        NORTH: {status: "unknown", enabled: true},
-        NORTH_EAST: {status: "unknown", enabled: true},
-        SOUTH_EAST: {status: "unknown", enabled: true},
-        SOUTH: {status: "unknown", enabled: true},
-        SOUTH_WEST: {status: "blocked", enabled: true},
-        NORTH_WEST: {status: "blocked", enabled: true},
-    };
-    gameState.exit = {row: 2, col: 12};
-    at(gameState.exit).events = {
-        enter: "exit",
-        exit: "noop",
-        use: "noop",
-    };
-    at(gameState.exit).revealed = true;
-    at(gameState.exit).hallways = {
-        NORTH: {status: "open", enabled: true},
-        NORTH_EAST: {status: "unknown", enabled: true},
-        SOUTH_EAST: {status: "unknown", enabled: true},
-        SOUTH: {status: "open", enabled: true},
-        SOUTH_WEST: {status: "open", enabled: true},
-        NORTH_WEST: {status: "open", enabled: true},
-    };
-    gameState.isRunning = true;
-    gameState.lastEffect = "";
-    gameState.currentState = "move";
-    gameState.draft = {
-        index: 0,
-        position: {
-            row: 0,
-            col: 0,
-        },
-        direction: "NORTH",
-        options: [
-            new Room(),
-            new Room(),
-            new Room(),
-        ]
-    };
-    gameState.draft.options.forEach(draft => draft.revealed = true);
-    gameState.resources = {
-        "steps": 40,
-        "keys": 1,
-        "gems": 0,
-    };
-};
-
-/**
- * Retrieves the amount of the selected item in the player resources.
- *  @param {Item} item
- *  */
-const getResourcesItemCount = (item) => gameState.resources[item] ?? 0;
-
-/**
- * Adds the selected item to the player resources.
- *  @param {Item} item
- *  @param {number} amount
- *  */
-const addResourcesItem = (item, amount = 1) => {
-    if (!(item in gameState.resources)) {
-        gameState.resources[item] = 0;
-    }
-    gameState.resources[item] += amount;
-}
-/**
- * Sets the selected item count in the player resources.
- *  @param {Item} item
- *  @param {number} amount
- *  */
-const setResourcesItem = (item, amount) => gameState.resources[item] = amount
-
-/**
- * Adds the selected item to the player resources.
- *  @param {Item} item
- *  @param {number} amount
- *  */
-const removeResourcesItem = (item, amount = 1) => {
-    if (item in gameState.resources) {
-        gameState.resources[item] -= amount;
-        if (gameState.resources[item] < 0) {
-            gameState.resources[item] = 0;
-        }
-    }
-}
-
 /**
  *  @param {Coord} position
  *  @param {Direction} direction
@@ -729,10 +1228,10 @@ const removeResourcesItem = (item, amount = 1) => {
 const generateHallway = (position, direction, draftRoom) => {
     const chance = 0.4;
     const neighborPos = tileTowards(position, direction);
-    if (valid(neighborPos)) {
-        if (Math.random() < chance) {
+    if (gameState.validCoord(neighborPos)) {
+        if (randomFloat() < chance) {
             const neighbor = at(neighborPos);
-            if (hidden(neighborPos)) {
+            if (gameState.isHiddenCoord(neighborPos)) {
                 draftRoom.hallways[direction].enabled = true;
                 draftRoom.hallways[direction].status = "unknown";
             } else if (neighbor.hallways[opposite(direction)].enabled) {
@@ -776,7 +1275,7 @@ const generateDraftRoom = (index, direction) => {
 
     room.hallways[opposite(direction)].enabled = true;
     room.hallways[opposite(direction)].status = "open";
-    room.needsKey = purpose !== "extraKey" && Math.random() < 0.5;
+    room.needsKey = purpose !== "extraKey" && randomBool();
 
 }
 
@@ -788,7 +1287,7 @@ const refreshDrafts = () => {
         generateDraftRoom(0, direction);
         generateDraftRoom(1, direction);
         generateDraftRoom(2, direction);
-        canDraft = getResourcesItemCount("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
+        canDraft = gameState.getResource("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
     } while (!canDraft);
 }
 
@@ -801,38 +1300,38 @@ const updatePlayerPosition = (direction) => {
     if (!gameState.isRunning) return;
 
     const newPosition = tileTowards(gameState.player, direction);
-    if (!valid(newPosition)) return;
-    if (getResourcesItemCount("steps") <= 0) return;
+    if (!gameState.validCoord(newPosition)) return;
+    if (gameState.getResource("steps") <= 0) return;
     const hallways = at(gameState.player).hallways;
     if (hallways[direction].enabled && hallways[direction].status !== "blocked") {
-        if (hidden(newPosition)) {
+        if (gameState.isHiddenCoord(newPosition)) {
             gameState.draft.position = newPosition;
             gameState.draft.direction = direction;
-            gameState.currentState = "draft";
+            gameState.setState("draft");
             refreshDrafts();
         } else if (at(newPosition).hallways[opposite(direction)].enabled) {
             at(newPosition).enter();
-            gameState.player = newPosition;
-            removeResourcesItem("steps");
+            gameState.movePlayerToCoord(newPosition);
+            gameState.removeResource("steps");
         }
     }
 }
 
 const placeRoom = () => {
     const newRoom = gameState.draft.options[gameState.draft.index].copy();
-    if (newRoom.needsKey && getResourcesItemCount("keys") === 0) {
+    if (newRoom.needsKey && gameState.getResource("keys") === 0) {
         return;
     }
     if (newRoom.needsKey) {
         newRoom.needsKey = false;
-        removeResourcesItem("keys");
+        gameState.removeResource("keys");
     }
-    gameState.grid[gameState.draft.position.row][gameState.draft.position.col] = newRoom;
+    gameState.placeRoom(gameState.draft.position.row, gameState.draft.position.col, newRoom);
     updatePlayerPosition(gameState.draft.direction);
     gameState.draft.index = 0;
     DIRECTION_VALUES.forEach(direction => {
         const neighborPos = tileTowards(gameState.draft.position, direction);
-        if (valid(neighborPos) && !hidden(neighborPos)) {
+        if (gameState.validCoord(neighborPos) && gameState.isRevealedCoord(neighborPos)) {
             const neighbor = at(neighborPos);
             if (!newRoom.hallways[direction].enabled && neighbor.hallways[opposite(direction)].enabled) {
                 neighbor.hallways[opposite(direction)].status = "blocked";
@@ -841,8 +1340,7 @@ const placeRoom = () => {
             }
         }
     });
-
-    gameState.currentState = "move";
+    gameState.setState("move");
 };
 
 /**@param {number} delta - the delta time since last update call */
@@ -853,6 +1351,8 @@ const update = (delta) => {
         }
     }
     animations = animations.filter((t) => t.active);
+    // gameState.mouseGridRow = -1;
+    // gameState.mouseGridCol = -1;
 };
 
 /**
@@ -889,33 +1389,32 @@ const rotateSpin = (startAngle, endAngle, duration, onUpdate, loop = false, opti
  * @param {Hallway} hallway
  * @param {number} midX
  * @param {number} midY
- * @param {number} unitWidth
- * @param {number} unitHeight
+ * @param {number} r
  * @param {Direction} direction
  */
-const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) => {
+const renderHallway = (hallway, midX, midY, r, direction) => {
     if (!hallway.enabled) return;
     const options = {
         "open": {
-            factor: 2,
+            factor: 1,
             color: CSS_COLOR_NAMES.Lavender,
         },
         "blocked": {
-            factor: 5,
+            factor: 0.5,
             color: CSS_COLOR_NAMES.FireBrick,
         },
         "unknown": {
-            factor: 3,
+            factor: 0.75,
             color: "#e6e6e6",
         }
     }
+    const hallwayLength = Math.sqrt(3) * r / 2;
     const factor = options[hallway.status].factor;
     context.fillStyle = options[hallway.status].color;
 
     context.lineWidth = 1;
     context.strokeStyle = "black";
 
-    const lineWidth = Math.max(10, Math.floor(unitWidth / 10));
     const drawRotatedRect = (x, y, width, height, angleRad) => {
         context.save();
         context.translate(x, y);
@@ -924,7 +1423,7 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
         context.fillRect(-width / 2, -height, width, height);
         context.restore();
     };
-    drawRotatedRect(midX, midY, lineWidth, unitHeight / factor, DIRECTION_VALUES.indexOf(direction) * Math.PI / 3);
+    drawRotatedRect(midX, midY, r / 5, hallwayLength * factor, DIRECTION_VALUES.indexOf(direction) * Math.PI / 3);
 };
 
 /**
@@ -936,15 +1435,22 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
  * @param {boolean} borders
  */
 const renderHexRoom = (cx, cy, r, room, borders = false) => {
-    if (!room.revealed) return;
-    renderHexagon(cx, cy, r, {
-        fill: ROOM_COLORS[room.events.enter],
-        ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
-    });
-    DIRECTION_VALUES.forEach((direction) => {
-        renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
-    });
-    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+    if (room.revealed) {
+        renderHexagon(cx, cy, r, {
+            fill: ROOM_COLORS[room.events.enter],
+            ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
+        });
+        DIRECTION_VALUES.forEach((direction) => {
+            renderHallway(room.hallways[direction], cx, cy, r, direction);
+        });
+        renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+    } else if (DEBUG_MODE) {
+        renderHexagon(cx, cy, r, undefined,
+            {
+                fill: CLEAR_COLOR,
+                border: CSS_COLOR_NAMES.Wheat,
+            });
+    }
 };
 
 
@@ -1048,7 +1554,7 @@ const renderInLayout = (zone, callback) => {
  * @param {number} width
  * @param {number} height
  */
-const renderGoal = (width, height) => {
+const renderMovement = (width, height) => {
     const unitWidth = width / 2;
     const unitHeight = height / 5;
 
@@ -1064,7 +1570,7 @@ const renderGoal = (width, height) => {
     const r = unitWidth * 0.5;
     renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
     DIRECTION_VALUES.forEach((direction) => {
-        renderHallway({enabled: true, status: "open"}, cx, cy, unitWidth, unitHeight, direction);
+        renderHallway({enabled: true, status: "open"}, cx, cy, r, direction);
     });
     renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
     const controls = ["D", "S", "A", "Q", "W", "E"];
@@ -1076,6 +1582,138 @@ const renderGoal = (width, height) => {
         context.textBaseline = 'middle';
         drawKeyLabel(controls[i], x, y);
     }
+};
+
+/**
+ *
+ * @param {number} startX
+ * @param {number} startY
+ * @param {number} endX
+ * @param {number} endY
+ * @param {number} periods
+ * @param {number} amplitude
+ */
+const renderWavyLine = (startX, startY, endX, endY, periods = 5, amplitude = 5) => {
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const length = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+
+    context.save();
+    context.translate(startX, startY);
+    context.rotate(angle);
+    context.beginPath();
+    context.lineWidth = 2;
+
+    for (let i = 0; i <= length; i++) {
+        const waveY = Math.sin((i / length) * 2 * Math.PI * periods) * amplitude;
+        const px = i;
+        const py = waveY;
+        if (i === 0) context.moveTo(px, py);
+        else context.lineTo(px, py);
+    }
+    context.stroke();
+    context.restore();
+};
+
+/** @type {Map<string, PuzzlePiece>} */
+const randomSymbolCache = new Map();
+
+/**
+ *
+ * @param {string} coords
+ * @param {string[]} symbols
+ * @param {string[]} altSymbols
+ * @return {PuzzlePiece}
+ */
+const calculateIfAbsent = (coords, symbols, altSymbols) => {
+    /** {@type {PuzzlePiece} */
+    let value = randomSymbolCache.get(coords);
+    if (!value) {
+        const lineTypes = ["straight", "wavy", "dotted", "dashed"];
+        value = {
+            //fillColor: randomColor(),
+            fillColor: randomElement(Object.values(ROOM_COLORS)),
+            innerSymbol: randomElement(symbols),
+            outerSymbol: randomElement(altSymbols),
+            lineType: randomElement(lineTypes),
+        };
+        randomSymbolCache.set(coords, value);
+    }
+    return value;
+}
+
+/**
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ */
+const renderPuzzle = (cx, cy, r) => {
+
+    const lineLength = r / 8;
+    const spaceLength = r / 16;
+    context.lineCap = 'round';
+    const symbols = Object.values(SymbolTexts);
+    const altSymbols = Object.values(AltSymbolTexts);
+
+    const coords = `[${gameState.player.row};${gameState.player.col}]`;
+    const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
+
+    renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
+
+    context.setLineDash([lineLength, spaceLength]);
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i + 30);
+        const x = cx + 0.6 * r * Math.cos(angle);
+        const y = cy + 0.6 * r * Math.sin(angle);
+        context.font = "20px monospace";
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillStyle = "white";
+        context.fillText(`${randomSymbols.outerSymbol}`, x, y);
+    }
+
+    context.setLineDash([]);
+    context.strokeStyle = "white";
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 180 * (60 * i);
+
+        const startX = cx + 20 * Math.cos(angle);
+        const startY = cy + 20 * Math.sin(angle);
+        const endX = cx + r * Math.cos(angle);
+        const endY = cy + r * Math.sin(angle);
+
+        if (randomSymbols.lineType === "wavy") {
+            renderWavyLine(startX, startY, endX, endY);
+        } else {
+            switch (randomSymbols.lineType) {
+                case "straight": {
+                    context.lineWidth = 2;
+                    context.setLineDash([]);
+                    break;
+                }
+                case "dotted": {
+                    context.setLineDash([r / 30]);
+                    break;
+                }
+                case "dashed": {
+                    context.setLineDash([r / 5]);
+                    break;
+                }
+            }
+            context.beginPath();
+            context.moveTo(startX, startY);
+            context.lineTo(endX, endY);
+            context.stroke();
+        }
+    }
+    context.setLineDash([]);
+    renderCircle(cx, cy, 15, {fill: "white"});
+    context.font = "20px monospace";
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    //const symbol = symbols[4];
+    context.fillText(`${randomSymbols.innerSymbol}`, cx, cy);
 };
 
 /**
@@ -1093,13 +1731,21 @@ const renderResources = (width, height) => {
     context.textAlign = 'left';
     context.font = "20px monospace";
     const texts = [];
-    for (const [key, value] of Object.entries(gameState.resources)) {
-        texts.push(`\u2022 ${ItemTexts[key]} ${key.substring(0, 1).toUpperCase() + key.substring(1)}: ${value}`);
+    for (const {type, count} of gameState.getResources()) {
+        texts.push(`\u2022 ${ItemTexts[type]} ${type.substring(0, 1).toUpperCase() + type.substring(1)}: ${count}`);
     }
 
     texts.forEach((text, idx) => {
         context.fillText(text, width / 2.5, (idx + 1) * 30 + 10);
     });
+
+    const unitWidth = width / 2;
+    const unitHeight = height / 5;
+
+    const cx = unitWidth;
+    const cy = 3 * unitHeight;
+    const r = unitWidth * 0.5;
+    renderPuzzle(cx, cy, r);
 };
 
 /**
@@ -1124,10 +1770,23 @@ const renderHexGrid = (width, height) => {
             //Shift items in even columns 1 unit down. Center is offset as well.
             const offsetY = ((col % 2) + 1) * rowOffset;
             const cy = (row * hexHeight) + offsetY;
-            renderHexRoom(cx, cy, r, gameState.grid[row][col]);
+            renderHexRoom(cx, cy, r, gameState.at(row, col));
+            //renderPuzzle(cx, cy, r);
             if (row === gameState.player.row && col === gameState.player.col) {
                 //player, TODO animation
                 renderCircle(cx, cy, 10, {fill: PLAYER_COLOR});
+            }
+            if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
+                context.fillText(`[${row};${col}]`, cx, cy);
+            }
+
+            if (gameState.getState() === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
+                context.save();
+                context.fillStyle = ROOM_COLORS.draft;
+                context.globalAlpha = selectionAlpha;
+                //renderHexagon(cx, cy, 0.75*r, {fill: ROOM_COLORS.draft});
+                renderHexRoom(cx, cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
+                context.restore();
             }
         }
     }
@@ -1136,14 +1795,38 @@ const renderHexGrid = (width, height) => {
 let selectionAlpha = 1;
 let refreshRotation = 0;
 
+/**
+ * @param {number} mouseX
+ * @param {number} mouseY
+ * @param {number} r
+ * @return {Coord}
+ */
+const mouseToGrid = (mouseX, mouseY, r) => {
+    const rows = gameState.rows;
+    const cols = gameState.cols;
+
+    const hexHeight = Math.sqrt(3) * r;
+    const rowOffset = hexHeight / 2;
+
+    const col = Math.floor((mouseX - r) / (1.5 * r));
+    const offsetY = ((col % 2) + 1) * rowOffset;
+    const row = Math.floor((mouseY - offsetY) / hexHeight + 0.5);
+
+    return {
+        row: Math.max(0, Math.min(rows - 1, row)),
+        col: Math.max(0, Math.min(cols - 1, col))
+    };
+};
+
 
 /**
  * @param {number} cx
  * @param {number} cy
  * @param {number} r
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
+ * @param {{fill?: string, border?: string, borderWidth?: number}} highlight
  */
-const renderHexagon = (cx, cy, r, colors) => {
+const renderHexagon = (cx, cy, r, colors, highlight = undefined) => {
     /*
                r
           +----T----+         ^
@@ -1167,7 +1850,11 @@ const renderHexagon = (cx, cy, r, colors) => {
         else context.lineTo(x, y);
     }
     context.closePath();
-    useColors(colors);
+    if (highlight) {
+        useColors(highlight);
+    } else if (colors) {
+        useColors(colors);
+    }
     context.restore();
 };
 
@@ -1192,7 +1879,7 @@ const renderCircle = (cx, cy, r, colors) => {
  * @param {number} height
  */
 const renderHexDraft = (width, height) => {
-    if (gameState.currentState !== "draft") return;
+    if (gameState.getState() !== "draft") return;
     const row = 0.5;
     const unitWidth = width / 16;
     const unitHeight = height / 2;
@@ -1234,7 +1921,7 @@ const renderHexDraft = (width, height) => {
                 context.fillText(ItemTexts.keys, iconX, iconY);
             }
 
-            const closedRoom = draftedRoom.needsKey && getResourcesItemCount("keys") === 0;
+            const closedRoom = draftedRoom.needsKey && gameState.getResource("keys") === 0;
             context.save();
             context.globalAlpha = selectionAlpha;
             renderHexagon(cx, cy, 1.2 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
@@ -1242,7 +1929,7 @@ const renderHexDraft = (width, height) => {
         }
     }
 
-    if (getResourcesItemCount("gems") >= 2) {
+    if (gameState.getResource("gems") >= 2) {
         const arrowX = (14.5 * unitWidth);
         const arrowY = unitHeight;
         drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
@@ -1259,7 +1946,7 @@ const renderHexDraft = (width, height) => {
  * @param {number} width
  * @param {number} height
  */
-const renderMovementAndHints = (width, height) => {
+const renderHints = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
@@ -1283,6 +1970,7 @@ const render = () => {
     const unitWidth = canvas.width / 16;
     const unitHeight = canvas.height / 9;
 
+    /** @type {Record<string, Rectangle>} */
     const layout = {
         /** @type {Rectangle} */
         draft: {
@@ -1306,7 +1994,7 @@ const render = () => {
             height: unitHeight * 5
         },
         /** @type {Rectangle} */
-        header: {
+        movement: {
             x: unitWidth * 13,
             y: unitHeight * 2,
             width: unitWidth * 3,
@@ -1326,17 +2014,17 @@ const render = () => {
 
     const tileSize = Math.min(128, Math.floor(Math.min(canvas.width / cols, canvas.height / rows)));
 
-    context.fillStyle = "#1D1D1D";
+    context.fillStyle = CLEAR_COLOR;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     const offsetX = Math.floor((canvas.width - tileSize * cols) / 2);
     const offsetY = Math.floor((canvas.height - tileSize * rows) / 2);
 
-    renderInLayout(layout.header, renderGoal);
+    renderInLayout(layout.draft, renderHexDraft);
     renderInLayout(layout.resources, renderResources);
     renderInLayout(layout.grid, renderHexGrid);
-    renderInLayout(layout.draft, renderHexDraft);
-    renderInLayout(layout.footer, renderMovementAndHints);
+    renderInLayout(layout.movement, renderMovement);
+    renderInLayout(layout.footer, renderHints);
 
     if (DEBUG_MODE) {
         context.strokeStyle = CSS_COLOR_NAMES.Pink;
@@ -1352,89 +2040,99 @@ const render = () => {
         }
     }
 
-    if (gameState.currentState + "sdf" === "draft") {
-
-    } else {
-        if (gameState.lastEffect !== "noop") {
-            context.textAlign = 'right';
-            context.textBaseline = 'middle';
-            context.fillStyle = "white";
-            context.font = "25px Consolas";
-            context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
-        }
+    if (gameState.lastEffect !== "noop") {
+        context.textAlign = 'right';
+        context.textBaseline = 'middle';
+        context.fillStyle = "white";
+        context.font = "25px Consolas";
+        context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
     }
 };
 
 /**
  *
+ * @param {MouseEvent} event
+ */
+const handleMove = (event) => {
+    gameState.mouseX = event.offsetX;
+    gameState.mouseY = event.offsetY;
+};
+
+/**
+ *
+ * @param {MouseEvent} event
+ */
+const handleClick = (event) => {
+    if (gameState.getState() === "move") {
+        if (gameState.valid(gameState.mouseGridRow, gameState.mouseGridCol)) {
+            console.log(`Move [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
+        } else {
+            console.log(`Cannot move to [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
+        }
+    }
+};
+
+/** @type {Object<string, Function>} */
+const globalShortcuts = {
+    r: () => gameState.newGame(),
+    h: () => (DEBUG_MODE = !DEBUG_MODE),
+    g: () => gameState.addResource("gems", 5),
+    k: () => gameState.addResource("keys", 5)
+};
+
+/** @type {Record<string, Function>} */
+const moveControls = {
+    w: () => updatePlayerPosition("NORTH"),
+    ArrowUp: () => updatePlayerPosition("NORTH"),
+    e: () => updatePlayerPosition("NORTH_EAST"),
+    d: () => updatePlayerPosition("SOUTH_EAST"),
+    s: () => updatePlayerPosition("SOUTH"),
+    ArrowDown: () => updatePlayerPosition("SOUTH"),
+    a: () => updatePlayerPosition("SOUTH_WEST"),
+    q: () => updatePlayerPosition("NORTH_WEST")
+};
+
+/** @type {Record<string, Function>} */
+const draftControls = {
+    d: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
+    ArrowRight: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
+    a: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
+    ArrowLeft: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
+    " ": () => placeRoom(),
+    Enter: () => placeRoom(),
+    r: () => {
+        if (gameState.getResource("gems") >= 2) {
+            gameState.removeResource("gems", 2);
+            refreshDrafts();
+        }
+    }
+};
+
+/**
+ * Handles keyboard input based on the current game state.
  * @param {KeyboardEvent} event
  */
 const handleInput = (event) => {
-    if (gameState.currentState === "move") {
-        switch (event.key) {
-            case "w":
-                updatePlayerPosition("NORTH");
-                break;
-            case "e":
-                updatePlayerPosition("NORTH_EAST");
-                break;
-            case "d":
-                updatePlayerPosition("SOUTH_EAST");
-                break;
-            case "s":
-                updatePlayerPosition("SOUTH");
-                break;
-            case "a":
-                updatePlayerPosition("SOUTH_WEST");
-                break;
-            case "q":
-                updatePlayerPosition("NORTH_WEST");
-                break;
-            case "r":
-                newGame();
-                break;
-            case "h":
-                DEBUG_MODE = !DEBUG_MODE;
-                break;
-            case "g":
-                addResourcesItem("gems", 5);
-                break;
-            case "k":
-                addResourcesItem("keys", 5);
-                break;
-        }
-    } else {
-        switch (event.key) {
-            case "ArrowRight":
-            case "d":
-                gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1);
-                break;
-            case "ArrowLeft":
-            case "a":
-                gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1);
-                break;
-            case " ":
-            case "Enter":
-                placeRoom();
-                break;
-            case "r":
-                if (getResourcesItemCount("gems") >= 2) {
-                    removeResourcesItem("gems", 2);
-                    refreshDrafts();
-                }
-                break;
-            case "h":
-                DEBUG_MODE = !DEBUG_MODE;
-                break;
-            case "g":
-                addResourcesItem("gems", 5);
-                break;
-            case "k":
-                addResourcesItem("keys", 5);
-                break;
-        }
+    const key = event.key;
+    const mode = gameState.getState();
+
+    if (globalShortcuts[key]) {
+        globalShortcuts[key]();
+        return;
     }
-}
+
+    if (mode === "move" && moveControls[key]) {
+        moveControls[key]();
+        return;
+    }
+
+    if (mode === "draft" && draftControls[key]) {
+        draftControls[key]();
+        return;
+    }
+};
+
+
 let lastFrameTime = performance.now();
 /**
  *
@@ -1444,7 +2142,7 @@ const gameLoop = (timestamp) => {
     const delta = timestamp - lastFrameTime;
     const fps = 1000 / delta;
     lastFrameTime = timestamp;
-    gameState.lastTimestamp = timestamp;
+    gameState.lastTimeStamp = timestamp;
     update(timestamp);
     render();
     context.textAlign = 'left';
@@ -1457,9 +2155,10 @@ const gameLoop = (timestamp) => {
 
 const run = async () => {
     document.addEventListener("keydown", handleInput);
-    newGame();
+    //document.addEventListener("mousemove", handleMove);
+    //document.addEventListener("mousedown", handleClick);
 
     gameLoop(0);
 };
 
-run();
+run().then(() => console.log("Game started."));
