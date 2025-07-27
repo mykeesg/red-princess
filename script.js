@@ -69,6 +69,10 @@ let DEBUG_MODE = false;
  */
 
 /**
+ * What state the game is in
+ * @typedef {"move"|"draft"} GameState
+ */
+/**
  * What can be found in a room
  * @typedef {"keys"|"lock"|"gems"|"steps"} Item
  */
@@ -143,6 +147,16 @@ const AltSymbolTexts = {
     "grid": "🔳",
 };
 
+/**
+ * Determines whether a point (x, y) lies inside a given rectangular area.
+ *
+ * @param {number} x - The horizontal position of the point.
+ * @param {number} y - The vertical position of the point.
+ * @param {Rectangle} rect - The rectangle to test against.
+ * @returns {boolean} - Returns true if the point is within the bounds of the rectangle.
+ */
+const isInside = (x, y, rect) =>
+    rect.x <= x && rect.y <= y && x <= rect.x + rect.width && y <= rect.y + rect.height;
 
 class SeededRNG {
     /**
@@ -156,25 +170,25 @@ class SeededRNG {
     }
 
     setSeed(seed) {
-        this.seed = seed ?? Math.floor(Math.random() * Math.pow(2, 31)) + 1;
+        this.#seed = seed ?? Math.floor(Math.random() * Math.pow(2, 31)) + 1;
     }
 
     float() {
-        this.seed ^= this.seed << 13;
-        this.seed ^= this.seed >> 17;
-        this.seed ^= this.seed << 5;
-        return (this.seed >>> 0) / 0xFFFFFFFF;
+        this.#seed ^= this.#seed << 13;
+        this.#seed ^= this.#seed >> 17;
+        this.#seed ^= this.#seed << 5;
+        return (this.#seed >>> 0) / 0xFFFFFFFF;
     }
 
     int32() {
-        this.seed ^= this.seed << 13;
-        this.seed ^= this.seed >> 17;
-        this.seed ^= this.seed << 5;
-        return this.seed | 0;
+        this.#seed ^= this.#seed << 13;
+        this.#seed ^= this.#seed >> 17;
+        this.#seed ^= this.#seed << 5;
+        return this.#seed | 0;
     }
 
-    getSeed() {
-        return this.seed;
+    get seed() {
+        return this.#seed;
     }
 }
 
@@ -240,7 +254,7 @@ const randomHexColor = () => {
 const Effects = {
     "extraSteps":
         {
-            invoke: () => addResourcesItem("steps", 2),
+            invoke: () => gameState.addResource("steps", 2),
             description: "Take a rest.",
             triggerText: "You have gained 2 extra steps.",
             triggerLimit: -1,
@@ -248,7 +262,7 @@ const Effects = {
         },
     "extraKey":
         {
-            invoke: () => addResourcesItem("keys"),
+            invoke: () => gameState.addResource("keys"),
             description: "Alohomora.",
             triggerText: "You have found a key.",
             triggerLimit: 1,
@@ -256,7 +270,7 @@ const Effects = {
         },
     "money":
         {
-            invoke: () => addResourcesItem("gems"),
+            invoke: () => gameState.addResource("gems"),
             description: "What's that spark in the corner?",
             triggerText: "You have found a gem.",
             triggerLimit: 1,
@@ -264,7 +278,7 @@ const Effects = {
         },
     "taxes":
         {
-            invoke: () => removeResourcesItem("gems"),
+            invoke: () => gameState.removeResource("gems"),
             description: "Takes a toll on you.",
             triggerText: `You have to pay taxes: ${ItemTexts.gems}`,
             triggerLimit: -1,
@@ -272,7 +286,7 @@ const Effects = {
         },
     "garden":
         {
-            invoke: () => setResourcesItem("steps", 41),
+            invoke: () => gameState.setResource("steps", 41),
             description: "Like starting again.",
             triggerText: "Your steps have been reset.",
             triggerLimit: -1,
@@ -281,9 +295,9 @@ const Effects = {
     "shop":
         {
             invoke: () => {
-                if (getResourcesItemCount("gems") >= 5) {
-                    addResourcesItem("keys");
-                    removeResourcesItem("gems", 5);
+                if (gameState.getResource("gems") >= 5) {
+                    gameState.addResource("keys");
+                    gameState.removeResource("gems", 5);
                 }
             },
             description: "Buy your passage.",
@@ -294,7 +308,7 @@ const Effects = {
     "exit":
         {
             invoke: () => {
-                gameState.isRunning = false;
+                gameState.pause();
             },
             description: "",
             triggerText: "You have won!",
@@ -686,62 +700,403 @@ const ROOM_COLORS = {
 const PLAYER_COLOR = CSS_COLOR_NAMES.Black;
 const CLEAR_COLOR = "#1D1D1D";
 
-const gameState = {
-    /** @type {Room[][]} */
-    grid: [],
-    /** @type {number} */
-    rows: 5,
-    /** @type {number} */
-    cols: 13,
-    /** @type {Coord} */
-    player: {row: 2, col: 0},
-    /** @type {Coord} */
-    exit: {row: 2, col: 9},
-    /** @type {boolean} */
-    isRunning: true,
-    /** @type {string} */
-    lastEffect: "noop",
-    /** @type {"move"|"draft"} */
-    currentState: "move",
-    /** @type {{index: number, position: Coord, direction: Direction, options: Room[] }} */
-    draft: {
-        index: 0,
-        direction: "NORTH",
-        position: {
-            row: 0,
-            col: 0,
-        },
-        options: []
-    },
+class Game {
+    /**
+     * @type {number} number of rows in the grid
+     */
+    #rows;
+    /**
+     * @type {number} number of columns in the grid
+     */
+    #cols;
+    /**
+     * @type {Room[][]} The grid area of the game
+     */
+    #grid;
+    /**
+     * The player position on the grid
+     * @type {Coord} */
+    #player;
+    /**
+     * The exit position on the grid
+     * @type {Coord} */
+    #exit;
+    /**
+     * The current state the game is in
+     *  @type {GameState} */
+    #currentState;
     /** @type {Partial<Record<Item, number>>} */
-    resources: {
-        keys: 0,
-        gems: 0,
-        steps: 0
-    },
+    #resources;
+    /** @type {boolean} */
+    #running;
+    /** @type {EffectType} */
+    #lastEffect;
     /** @type {number} */
-    lastTimeStamp: 0,
+    #lastTimeStamp;
+    /** @type {object} */
+    #draft;
     /** @type {number} */
-    mouseX: -1,
+    mouseX;
     /** @type {number} */
-    mouseY: -1,
+    mouseY;
     /** @type {number} */
-    mouseGridRow: -1,
+    mouseGridRow;
     /** @type {number} */
-    mouseGridCol: -1,
-};
+    mouseGridCol;
 
-/** @param {Coord} coord */
-const valid = (coord) => coord.row >= 0 && coord.row < gameState.rows && coord.col >= 0 && coord.col < gameState.cols;
+    constructor() {
+        this.newGame();
+    }
+
+    newGame() {
+        this.#rows = 5;
+        this.#cols = 13;
+
+        this.#grid = Array.from({length: this.#rows},
+            () => Array.from({length: this.#cols},
+                () => (new Room()))
+        );
+
+        this.#player = {row: 2, col: 0};
+        this.atCoord(this.player).events = {
+            enter: "noop",
+            exit: "noop",
+            use: "noop",
+        };
+        this.atCoord(this.player).revealed = true;
+        this.atCoord(this.player).hallways = {
+            NORTH: {status: "unknown", enabled: true},
+            NORTH_EAST: {status: "unknown", enabled: true},
+            SOUTH_EAST: {status: "unknown", enabled: true},
+            SOUTH: {status: "unknown", enabled: true},
+            SOUTH_WEST: {status: "blocked", enabled: true},
+            NORTH_WEST: {status: "blocked", enabled: true},
+        };
+
+        this.#exit = {row: 2, col: 9};
+        this.atCoord(this.exit).events = {
+            enter: "exit",
+            exit: "noop",
+            use: "noop",
+        };
+        this.atCoord(this.exit).revealed = true;
+        this.atCoord(this.exit).hallways = {
+            NORTH: {status: "unknown", enabled: true},
+            NORTH_EAST: {status: "blocked", enabled: true},
+            SOUTH_EAST: {status: "blocked", enabled: true},
+            SOUTH: {status: "unknown", enabled: true},
+            SOUTH_WEST: {status: "unknown", enabled: true},
+            NORTH_WEST: {status: "unknown", enabled: true},
+        };
+        this.#draft = {
+            index: 0,
+            position: {
+                row: 0,
+                col: 0,
+            },
+            direction: "NORTH",
+            options: [
+                new Room(),
+                new Room(),
+                new Room(),
+            ]
+        };
+        this.#draft.options.forEach(draft => draft.revealed = true);
+
+        this.#resources = {
+            "steps": 40,
+            "keys": 1,
+            "gems": 0,
+        };
+
+        this.mouseX = -1;
+        this.mouseY = -1;
+        this.mouseGridRow = -1;
+        this.mouseGridCol = -1;
+
+        this.#lastTimeStamp = 0;
+        this.#lastEffect = "noop";
+
+        this.setState("move");
+        this.play();
+    }
+
+    get rows() {
+        return this.#rows;
+    }
+
+    get cols() {
+        return this.#cols;
+    }
+
+    get player() {
+        return this.#player;
+    }
+
+    get exit() {
+        return this.#exit;
+    }
+
+    /**
+     Moves the player to the given position.
+
+     @assumes The coord is a valid coordinate on the grid
+     @param {number} row the row number
+     @param {number} col the column number
+     * */
+    movePlayerTo(row, col) {
+        this.#player.row = row;
+        this.#player.col = col;
+    }
+
+    /**
+     * Moves the player to the given position.
+     *
+     * @assumes The coord is a valid coordinate on the grid
+     * @param {Coord} coord
+     * */
+    movePlayerToCoord(coord) {
+        this.movePlayerTo(coord.row, coord.col);
+    }
+
+    /**
+     * Returns the room at the given position.
+     * @assumes The coord is a valid coordinate on the grid
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * @return {Room} the room in the grid.
+     * */
+    at(row, col) {
+        return this.#grid[row][col];
+    }
+
+    /**
+     * Returns the room at the given position.
+     *
+     * @assumes The coord is a valid coordinate on the grid
+     * @param {Coord} coord
+     * @return {Room} the room in the grid.
+     * */
+    atCoord(coord) {
+        return this.at(coord.row, coord.col);
+    }
+
+    /**
+     *
+     * @param {number} row
+     * @param {number} col
+     * @param {Room} room
+     */
+    placeRoom(row, col, room) {
+        if (this.valid(row, col)) {
+            this.#grid[row][col] = room;
+        }
+    }
+
+    /**
+     * Returns whether the given coordinate is valid on the grid.
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * @return {boolean} true if so, false otherwise
+     * */
+    valid(row, col) {
+        return 0 <= row && row < this.#rows && 0 <= col && col < this.#cols;
+    }
+
+    /**
+     * Returns whether the given coordinate is valid on the grid.
+     *
+     * @param {Coord} coord
+     * @return {boolean} true if so, false otherwise
+     * */
+    validCoord(coord) {
+        return this.valid(coord.row, coord.col);
+    }
+
+    /**
+     * Sets the current game state
+     * @param {GameState} state
+     */
+    setState(state) {
+        this.#currentState = state;
+    }
+
+    /**
+     * Gets the current game state
+     * @return {GameState} current state
+     */
+    getState() {
+        return this.#currentState;
+    }
+
+    /**
+     * Sets whether the given room on the grid is revealed or not
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * @param {boolean} value
+     * */
+    #setRevealed(row, col, value) {
+        this.at(row, col).revealed = value;
+    }
+
+    /**
+     * Reveals the given room on the grid
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    #reveal(row, col) {
+        this.#setRevealed(row, col, true);
+    }
+
+    /**
+     * Reveals the given room on the grid
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    #hide(row, col) {
+        this.#setRevealed(row, col, false);
+    }
+
+    /**
+     * Checks whether the given room on the grid is revealed
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    isRevealed(row, col) {
+        return this.at(row, col).revealed;
+    }
+
+    /**
+     Checks whether the given room on the grid is revealed
+     *
+     * @param {Coord} coord coord
+     * */
+    isRevealedCoord(coord) {
+        return this.isRevealed(coord.row, coord.col);
+    }
+
+    /**
+     Checks whether the given room on the grid is hidden
+     *
+     * @param {number} row the row number
+     * @param {number} col the column number
+     * */
+    isHidden(row, col) {
+        return !this.isRevealed(row, col);
+    }
+
+    /**
+     Checks whether the given room on the grid is hidden
+     *
+     * @param {Coord} coord the coordinate
+     * */
+    isHiddenCoord(coord) {
+        return this.isHidden(coord.row, coord.col);
+    }
+
+    /**
+     * Retrieves the amount of the selected item in the player resources.
+     *  @param {Item} item
+     *  */
+    getResource(item) {
+        return this.#resources[item] ?? 0;
+    }
+
+    /**
+     * Adds the selected item to the player resources.
+     *  @param {Item} item
+     *  @param {number} amount
+     *  */
+    addResource(item, amount = 1) {
+        if (!(item in this.#resources)) {
+            this.#resources[item] = 0;
+        }
+        this.#resources[item] += amount;
+    }
+
+    /**
+     * Removes the selected item from the player resources.
+     *  @param {Item} item
+     *  @param {number} amount
+     *  */
+    removeResource(item, amount = 1) {
+        if (item in this.#resources) {
+            this.#resources[item] -= amount;
+            if (this.#resources[item] < 0) {
+                this.#resources[item] = 0;
+            }
+        }
+    }
+
+    /**
+     * Sets the selected item count in the player resources.
+     *  @param {Item} item
+     *  @param {number} amount
+     *  */
+    setResource(item, amount) {
+        this.#resources[item] = amount;
+    }
+
+    /**
+     *
+     * @return {{type: Item, count: number}[]}
+     */
+    getResources() {
+        return Object.entries(this.#resources).map(([key, value]) => ({
+            /** @type {Item} */
+            type: key,
+            /** @type {number} */
+            count: value
+        }));
+    }
+
+    pause() {
+        this.#running = false;
+    }
+
+    play() {
+        this.#running = true;
+    }
+
+    get isRunning() {
+        return this.#running;
+    }
+
+    get draft() {
+        return this.#draft;
+    }
+
+    get lastTimeStamp() {
+        return this.#lastTimeStamp;
+    }
+
+    set lastTimeStamp(value) {
+        this.#lastTimeStamp = value;
+    }
+
+    get lastEffect() {
+        return this.#lastEffect;
+    }
+
+    set lastEffect(value) {
+        this.#lastEffect = value;
+    }
+}
+
+/** @type {Game} */
+const gameState = new Game();
 
 /**
  * @param {Coord} coord
  * @return {Room}
  * */
-const at = (coord) => gameState.grid[coord.row][coord.col];
-
-/** @param {Coord} coord */
-const hidden = (coord) => valid(coord) && !at(coord).revealed;
+const at = (coord) => gameState.atCoord(coord);
 
 /**
  * @param {Coord} x
@@ -750,6 +1105,7 @@ const hidden = (coord) => valid(coord) && !at(coord).revealed;
  * */
 const add = (x, y) => ({row: x.row + y.row, col: x.col + y.col});
 
+/** @type {Record<Direction, Coord>} */
 const HEX_DIRECTIONS_ODD_Q = {
     NORTH: {row: -1, col: 0},
     NORTH_EAST: {row: 0, col: +1},
@@ -759,6 +1115,7 @@ const HEX_DIRECTIONS_ODD_Q = {
     NORTH_WEST: {row: 0, col: -1},
 };
 
+/** @type {Record<Direction, Coord>} */
 const HEX_DIRECTIONS_EVEN_Q = {
     NORTH: {row: -1, col: 0},
     NORTH_EAST: {row: -1, col: +1},
@@ -773,6 +1130,7 @@ const HEX_DIRECTIONS_EVEN_Q = {
  * @return {Coord}
  * */
 const tileTowards = (position, direction) => {
+    /** @type {Coord} */
     const offset = position.col % 2 === 0 ? HEX_DIRECTIONS_EVEN_Q[direction] : HEX_DIRECTIONS_ODD_Q[direction];
     return add(position, offset);
 }
@@ -803,105 +1161,6 @@ const opposite = (direction) => {
     throw new Error();
 }
 
-const newGame = () => {
-    gameState.grid = Array.from({length: gameState.rows},
-        () => Array.from({length: gameState.cols},
-            () => (new Room()))
-    );
-
-    gameState.player = {row: 2, col: 0};
-    at(gameState.player).events = {
-        enter: "noop",
-        exit: "noop",
-        use: "noop",
-    };
-    at(gameState.player).revealed = true;
-    at(gameState.player).hallways = {
-        NORTH: {status: "unknown", enabled: true},
-        NORTH_EAST: {status: "unknown", enabled: true},
-        SOUTH_EAST: {status: "unknown", enabled: true},
-        SOUTH: {status: "unknown", enabled: true},
-        SOUTH_WEST: {status: "blocked", enabled: true},
-        NORTH_WEST: {status: "blocked", enabled: true},
-    };
-    gameState.exit = {row: 2, col: 12};
-    at(gameState.exit).events = {
-        enter: "exit",
-        exit: "noop",
-        use: "noop",
-    };
-    at(gameState.exit).revealed = true;
-    at(gameState.exit).hallways = {
-        NORTH: {status: "unknown", enabled: true},
-        NORTH_EAST: {status: "blocked", enabled: true},
-        SOUTH_EAST: {status: "blocked", enabled: true},
-        SOUTH: {status: "unknown", enabled: true},
-        SOUTH_WEST: {status: "unknown", enabled: true},
-        NORTH_WEST: {status: "unknown", enabled: true},
-    };
-    gameState.isRunning = true;
-    gameState.lastEffect = "";
-    gameState.lastTimeStamp = 0;
-    gameState.currentState = "move";
-    gameState.draft = {
-        index: 0,
-        position: {
-            row: 0,
-            col: 0,
-        },
-        direction: "NORTH",
-        options: [
-            new Room(),
-            new Room(),
-            new Room(),
-        ]
-    };
-    gameState.draft.options.forEach(draft => draft.revealed = true);
-    gameState.resources = {
-        "steps": 40,
-        "keys": 1,
-        "gems": 0,
-    };
-};
-
-/**
- * Retrieves the amount of the selected item in the player resources.
- *  @param {Item} item
- *  */
-const getResourcesItemCount = (item) => gameState.resources[item] ?? 0;
-
-/**
- * Adds the selected item to the player resources.
- *  @param {Item} item
- *  @param {number} amount
- *  */
-const addResourcesItem = (item, amount = 1) => {
-    if (!(item in gameState.resources)) {
-        gameState.resources[item] = 0;
-    }
-    gameState.resources[item] += amount;
-}
-/**
- * Sets the selected item count in the player resources.
- *  @param {Item} item
- *  @param {number} amount
- *  */
-const setResourcesItem = (item, amount) => gameState.resources[item] = amount
-
-/**
- * Adds the selected item to the player resources.
- *  @param {Item} item
- *  @param {number} amount
- *  */
-const removeResourcesItem = (item, amount = 1) => {
-    if (item in gameState.resources) {
-        gameState.resources[item] -= amount;
-        if (gameState.resources[item] < 0) {
-            gameState.resources[item] = 0;
-        }
-    }
-}
-
 /**
  *  @param {Coord} position
  *  @param {Direction} direction
@@ -910,10 +1169,10 @@ const removeResourcesItem = (item, amount = 1) => {
 const generateHallway = (position, direction, draftRoom) => {
     const chance = 0.4;
     const neighborPos = tileTowards(position, direction);
-    if (valid(neighborPos)) {
+    if (gameState.validCoord(neighborPos)) {
         if (randomFloat() < chance) {
             const neighbor = at(neighborPos);
-            if (hidden(neighborPos)) {
+            if (gameState.isHiddenCoord(neighborPos)) {
                 draftRoom.hallways[direction].enabled = true;
                 draftRoom.hallways[direction].status = "unknown";
             } else if (neighbor.hallways[opposite(direction)].enabled) {
@@ -969,7 +1228,7 @@ const refreshDrafts = () => {
         generateDraftRoom(0, direction);
         generateDraftRoom(1, direction);
         generateDraftRoom(2, direction);
-        canDraft = getResourcesItemCount("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
+        canDraft = gameState.getResource("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
     } while (!canDraft);
 }
 
@@ -982,38 +1241,38 @@ const updatePlayerPosition = (direction) => {
     if (!gameState.isRunning) return;
 
     const newPosition = tileTowards(gameState.player, direction);
-    if (!valid(newPosition)) return;
-    if (getResourcesItemCount("steps") <= 0) return;
+    if (!gameState.validCoord(newPosition)) return;
+    if (gameState.getResource("steps") <= 0) return;
     const hallways = at(gameState.player).hallways;
     if (hallways[direction].enabled && hallways[direction].status !== "blocked") {
-        if (hidden(newPosition)) {
+        if (gameState.isHiddenCoord(newPosition)) {
             gameState.draft.position = newPosition;
             gameState.draft.direction = direction;
-            gameState.currentState = "draft";
+            gameState.setState("draft");
             refreshDrafts();
         } else if (at(newPosition).hallways[opposite(direction)].enabled) {
             at(newPosition).enter();
-            gameState.player = newPosition;
-            removeResourcesItem("steps");
+            gameState.movePlayerToCoord(newPosition);
+            gameState.removeResource("steps");
         }
     }
 }
 
 const placeRoom = () => {
     const newRoom = gameState.draft.options[gameState.draft.index].copy();
-    if (newRoom.needsKey && getResourcesItemCount("keys") === 0) {
+    if (newRoom.needsKey && gameState.getResource("keys") === 0) {
         return;
     }
     if (newRoom.needsKey) {
         newRoom.needsKey = false;
-        removeResourcesItem("keys");
+        gameState.removeResource("keys");
     }
-    gameState.grid[gameState.draft.position.row][gameState.draft.position.col] = newRoom;
+    gameState.placeRoom(gameState.draft.position.row, gameState.draft.position.col, newRoom);
     updatePlayerPosition(gameState.draft.direction);
     gameState.draft.index = 0;
     DIRECTION_VALUES.forEach(direction => {
         const neighborPos = tileTowards(gameState.draft.position, direction);
-        if (valid(neighborPos) && !hidden(neighborPos)) {
+        if (gameState.validCoord(neighborPos) && gameState.isRevealedCoord(neighborPos)) {
             const neighbor = at(neighborPos);
             if (!newRoom.hallways[direction].enabled && neighbor.hallways[opposite(direction)].enabled) {
                 neighbor.hallways[opposite(direction)].status = "blocked";
@@ -1022,8 +1281,7 @@ const placeRoom = () => {
             }
         }
     });
-
-    gameState.currentState = "move";
+    gameState.setState("move");
 };
 
 /**@param {number} delta - the delta time since last update call */
@@ -1034,8 +1292,8 @@ const update = (delta) => {
         }
     }
     animations = animations.filter((t) => t.active);
-    gameState.mouseGridRow = -1;
-    gameState.mouseGridCol = -1;
+    // gameState.mouseGridRow = -1;
+    // gameState.mouseGridCol = -1;
 };
 
 /**
@@ -1414,8 +1672,8 @@ const renderResources = (width, height) => {
     context.textAlign = 'left';
     context.font = "20px monospace";
     const texts = [];
-    for (const [key, value] of Object.entries(gameState.resources)) {
-        texts.push(`\u2022 ${ItemTexts[key]} ${key.substring(0, 1).toUpperCase() + key.substring(1)}: ${value}`);
+    for (const {type, count} of gameState.getResources()) {
+        texts.push(`\u2022 ${ItemTexts[type]} ${type.substring(0, 1).toUpperCase() + type.substring(1)}: ${count}`);
     }
 
     texts.forEach((text, idx) => {
@@ -1453,7 +1711,7 @@ const renderHexGrid = (width, height) => {
             //Shift items in even columns 1 unit down. Center is offset as well.
             const offsetY = ((col % 2) + 1) * rowOffset;
             const cy = (row * hexHeight) + offsetY;
-            renderHexRoom(cx, cy, r, gameState.grid[row][col]);
+            renderHexRoom(cx, cy, r, gameState.at(row, col));
             //renderPuzzle(cx, cy, r);
             if (row === gameState.player.row && col === gameState.player.col) {
                 //player, TODO animation
@@ -1463,7 +1721,7 @@ const renderHexGrid = (width, height) => {
                 context.fillText(`[${row};${col}]`, cx, cy);
             }
 
-            if (gameState.currentState === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
+            if (gameState.getState() === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
                 context.save();
                 context.fillStyle = ROOM_COLORS.draft;
                 context.globalAlpha = selectionAlpha;
@@ -1562,7 +1820,7 @@ const renderCircle = (cx, cy, r, colors) => {
  * @param {number} height
  */
 const renderHexDraft = (width, height) => {
-    if (gameState.currentState !== "draft") return;
+    if (gameState.getState() !== "draft") return;
     const row = 0.5;
     const unitWidth = width / 16;
     const unitHeight = height / 2;
@@ -1604,7 +1862,7 @@ const renderHexDraft = (width, height) => {
                 context.fillText(ItemTexts.keys, iconX, iconY);
             }
 
-            const closedRoom = draftedRoom.needsKey && getResourcesItemCount("keys") === 0;
+            const closedRoom = draftedRoom.needsKey && gameState.getResource("keys") === 0;
             context.save();
             context.globalAlpha = selectionAlpha;
             renderHexagon(cx, cy, 1.2 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
@@ -1612,7 +1870,7 @@ const renderHexDraft = (width, height) => {
         }
     }
 
-    if (getResourcesItemCount("gems") >= 2) {
+    if (gameState.getResource("gems") >= 2) {
         const arrowX = (14.5 * unitWidth);
         const arrowY = unitHeight;
         drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
@@ -1746,8 +2004,8 @@ const handleMove = (event) => {
  * @param {MouseEvent} event
  */
 const handleClick = (event) => {
-    if (gameState.currentState === "move") {
-        if (valid({row: gameState.mouseGridRow, col: gameState.mouseGridCol})) {
+    if (gameState.getState() === "move") {
+        if (gameState.valid(gameState.mouseGridRow, gameState.mouseGridCol)) {
             console.log(`Move [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
         } else {
             console.log(`Cannot move to [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
@@ -1757,18 +2015,20 @@ const handleClick = (event) => {
 
 /** @type {Object<string, Function>} */
 const globalShortcuts = {
-    r: () => newGame(),
+    r: () => gameState.newGame(),
     h: () => (DEBUG_MODE = !DEBUG_MODE),
-    g: () => addResourcesItem("gems", 5),
-    k: () => addResourcesItem("keys", 5)
+    g: () => gameState.addResource("gems", 5),
+    k: () => gameState.addResource("keys", 5)
 };
 
 /** @type {Record<string, Function>} */
 const moveControls = {
     w: () => updatePlayerPosition("NORTH"),
+    ArrowUp: () => updatePlayerPosition("NORTH"),
     e: () => updatePlayerPosition("NORTH_EAST"),
     d: () => updatePlayerPosition("SOUTH_EAST"),
     s: () => updatePlayerPosition("SOUTH"),
+    ArrowDown: () => updatePlayerPosition("SOUTH"),
     a: () => updatePlayerPosition("SOUTH_WEST"),
     q: () => updatePlayerPosition("NORTH_WEST")
 };
@@ -1782,8 +2042,8 @@ const draftControls = {
     " ": () => placeRoom(),
     Enter: () => placeRoom(),
     r: () => {
-        if (getResourcesItemCount("gems") >= 2) {
-            removeResourcesItem("gems", 2);
+        if (gameState.getResource("gems") >= 2) {
+            gameState.removeResource("gems", 2);
             refreshDrafts();
         }
     }
@@ -1795,7 +2055,7 @@ const draftControls = {
  */
 const handleInput = (event) => {
     const key = event.key;
-    const mode = gameState.currentState;
+    const mode = gameState.getState();
 
     if (globalShortcuts[key]) {
         globalShortcuts[key]();
@@ -1836,9 +2096,8 @@ const gameLoop = (timestamp) => {
 
 const run = async () => {
     document.addEventListener("keydown", handleInput);
-    document.addEventListener("mousemove", handleMove);
-    document.addEventListener("mousedown", handleClick);
-    newGame();
+    //document.addEventListener("mousemove", handleMove);
+    //document.addEventListener("mousedown", handleClick);
 
     gameLoop(0);
 };
