@@ -1072,33 +1072,32 @@ const rotateSpin = (startAngle, endAngle, duration, onUpdate, loop = false, opti
  * @param {Hallway} hallway
  * @param {number} midX
  * @param {number} midY
- * @param {number} unitWidth
- * @param {number} unitHeight
+ * @param {number} r
  * @param {Direction} direction
  */
-const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) => {
+const renderHallway = (hallway, midX, midY, r, direction) => {
     if (!hallway.enabled) return;
     const options = {
         "open": {
-            factor: 2,
+            factor: 1,
             color: CSS_COLOR_NAMES.Lavender,
         },
         "blocked": {
-            factor: 5,
+            factor: 0.5,
             color: CSS_COLOR_NAMES.FireBrick,
         },
         "unknown": {
-            factor: 3,
+            factor: 0.75,
             color: "#e6e6e6",
         }
     }
+    const hallwayLength = Math.sqrt(3) * r / 2;
     const factor = options[hallway.status].factor;
     context.fillStyle = options[hallway.status].color;
 
     context.lineWidth = 1;
     context.strokeStyle = "black";
 
-    const lineWidth = Math.max(10, Math.floor(unitWidth / 10));
     const drawRotatedRect = (x, y, width, height, angleRad) => {
         context.save();
         context.translate(x, y);
@@ -1107,7 +1106,7 @@ const renderHallway = (hallway, midX, midY, unitWidth, unitHeight, direction) =>
         context.fillRect(-width / 2, -height, width, height);
         context.restore();
     };
-    drawRotatedRect(midX, midY, lineWidth, unitHeight / factor, DIRECTION_VALUES.indexOf(direction) * Math.PI / 3);
+    drawRotatedRect(midX, midY, r / 5, hallwayLength * factor, DIRECTION_VALUES.indexOf(direction) * Math.PI / 3);
 };
 
 /**
@@ -1125,7 +1124,7 @@ const renderHexRoom = (cx, cy, r, room, borders = false) => {
             ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
         });
         DIRECTION_VALUES.forEach((direction) => {
-            renderHallway(room.hallways[direction], cx, cy, r, 100, direction);
+            renderHallway(room.hallways[direction], cx, cy, r, direction);
         });
         renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
     } else if (DEBUG_MODE) {
@@ -1254,7 +1253,7 @@ const renderMovement = (width, height) => {
     const r = unitWidth * 0.5;
     renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
     DIRECTION_VALUES.forEach((direction) => {
-        renderHallway({enabled: true, status: "open"}, cx, cy, unitWidth, unitHeight, direction);
+        renderHallway({enabled: true, status: "open"}, cx, cy, r, direction);
     });
     renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
     const controls = ["D", "S", "A", "Q", "W", "E"];
@@ -1340,7 +1339,7 @@ const renderPuzzle = (cx, cy, r) => {
     const symbols = Object.values(SymbolTexts);
     const altSymbols = Object.values(AltSymbolTexts);
 
-    const coords = `[${cx};${cy}]`;
+    const coords = `[${gameState.player.row};${gameState.player.col}]`;
     const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
 
     renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
@@ -1462,6 +1461,15 @@ const renderHexGrid = (width, height) => {
             }
             if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
                 context.fillText(`[${row};${col}]`, cx, cy);
+            }
+
+            if (gameState.currentState === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
+                context.save();
+                context.fillStyle = ROOM_COLORS.draft;
+                context.globalAlpha = selectionAlpha;
+                //renderHexagon(cx, cy, 0.75*r, {fill: ROOM_COLORS.draft});
+                renderHexRoom(cx, cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
+                context.restore();
             }
         }
     }
