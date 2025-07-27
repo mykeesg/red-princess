@@ -496,6 +496,16 @@ class Room {
     }
 }
 
+/**
+ * Represents a draft state used for room placement and selection.
+ * @typedef {Object} Draft
+ * @property {number} index - The currently selected room index in the draft.
+ * @property {Coord} position - The grid coordinate where the draft is positioned.
+ * @property {Direction} direction - Direction of placement for the current room.
+ * @property {Room[]} options - Array of room options available in the draft.
+ */
+
+
 /** @type {HTMLCanvasElement} */
 // @ts-ignore
 const canvas = document.querySelector("#canvas");
@@ -702,46 +712,95 @@ const CLEAR_COLOR = "#1D1D1D";
 
 class Game {
     /**
-     * @type {number} number of rows in the grid
+     * Number of rows in the grid.
+     * @type {number}
      */
     #rows;
+
     /**
-     * @type {number} number of columns in the grid
+     * Number of columns in the grid.
+     * @type {number}
      */
     #cols;
+
     /**
-     * @type {Room[][]} The grid area of the game
+     * 2D array representing the hexagonal grid layout of rooms.
+     * @type {Room[][]}
      */
     #grid;
+
     /**
-     * The player position on the grid
-     * @type {Coord} */
+     * Current player position on the grid.
+     * @type {Coord}
+     */
     #player;
+
     /**
-     * The exit position on the grid
-     * @type {Coord} */
+     * Exit location in the grid.
+     * @type {Coord}
+     */
     #exit;
+
     /**
-     * The current state the game is in
-     *  @type {GameState} */
+     * Current gameplay state.
+     * @type {GameState}
+     */
     #currentState;
-    /** @type {Partial<Record<Item, number>>} */
+
+    /**
+     * Collection of resource types and their quantities.
+     * Keys are item names, values are counts.
+     * @type {Partial<Record<Item, number>>}
+     */
     #resources;
-    /** @type {boolean} */
+
+    /**
+     * Whether the game loop is currently active.
+     * @type {boolean}
+     */
     #running;
-    /** @type {EffectType} */
+
+    /**
+     * Most recently triggered effect type.
+     * @type {EffectType}
+     */
     #lastEffect;
-    /** @type {number} */
+
+    /**
+     * Timestamp from last game tick or update.
+     * @type {number}
+     */
     #lastTimeStamp;
-    /** @type {object} */
+
+    /**
+     * Draft pool used for room placement.
+     * Values are randomly generated upon entering draft mode.
+     * @type {Draft}
+     */
     #draft;
-    /** @type {number} */
+
+    /**
+     * Mouse X position relative to the canvas.
+     * @type {number}
+     */
     mouseX;
-    /** @type {number} */
+
+    /**
+     * Mouse Y position relative to the canvas.
+     * @type {number}
+     */
     mouseY;
-    /** @type {number} */
+
+    /**
+     * Grid row index beneath the mouse pointer.
+     * @type {number}
+     */
     mouseGridRow;
-    /** @type {number} */
+
+    /**
+     * Grid column index beneath the mouse pointer.
+     * @type {number}
+     */
     mouseGridCol;
 
     constructor() {
