@@ -23,5 +23,5 @@ jobs:
       - name: Commit minified file
         uses: stefanzweifel/git-auto-commit-action@v6
         with:
-          commit_message: "[CI] Minified JS file – auto-commit from your CI pipeline 🤖🛠️"
+          commit_message: "[bot] Minified JS file – auto-commit from your CI pipeline 🤖🛠️"
           file_pattern: "dist/script.min.js"
