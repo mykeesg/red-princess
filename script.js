@@ -685,7 +685,7 @@ const useColors = (colors) => {
     }
     if (colors.border) {
         context.strokeStyle = colors.border;
-        context.lineWidth = colors.borderWidth ?? 1;
+        context.lineWidth = colors.borderWidth ?? getFontSizeInPixels("xs") / 10;
         context.stroke();
     }
 }
@@ -1389,6 +1389,25 @@ const rotateSpin = (startAngle, endAngle, duration, onUpdate, loop = false, opti
     tweenLerp(startAngle, endAngle, duration, onUpdate, {...options, loop});
 };
 
+
+/**
+ *
+ * @type {Record<FontSize, number>}
+ */
+const FontSizeFactors = {
+    xs: 1,
+    sm: 2,
+    md: 3,
+    lg: 4,
+    xl: 5,
+};
+
+/**
+ * On FULL HD (1920x1080), the 'xs' unit is "12 px" wide, which is (width / 16) / 10 === unitWidth / 10.
+ * @param {FontSize} size
+ */
+const getFontSizeInPixels = (size) => canvas.width / 160 * FontSizeFactors[size];
+
 /**
  *
  * @param {Hallway} hallway
@@ -1417,7 +1436,8 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     const factor = options[hallway.status].factor;
     context.fillStyle = options[hallway.status].color;
 
-    context.lineWidth = 1;
+
+    context.lineWidth = getFontSizeInPixels("xs") / 10;
     context.strokeStyle = "black";
 
     const drawRotatedRect = (x, y, width, height, angleRad) => {
@@ -1484,7 +1504,7 @@ const drawRefreshArrow = (centerX, centerY, radius = 50) => {
         context.beginPath();
         context.arc(centerX, centerY, radius, startAngle, endAngle);
         context.strokeStyle = "white";
-        context.lineWidth = 3;
+        context.lineWidth = getFontSizeInPixels("xs") / 3;
         context.stroke();
         context.save();
 
@@ -1517,9 +1537,9 @@ const drawRefreshArrow = (centerX, centerY, radius = 50) => {
  * @param {number} centerY
  */
 const drawKeyLabel = (label, centerX, centerY) => {
-    const paddingX = 8;
-    const paddingY = 5;
-    const fontSize = 20;
+    const fontSize = getFontSizeInPixels("sm");
+    const paddingX = fontSize / 3;
+    const paddingY = fontSize / 5;
 
     context.save();
     context.font = `${fontSize}px monospace`;
@@ -1530,14 +1550,14 @@ const drawKeyLabel = (label, centerX, centerY) => {
 
     context.fillStyle = "#f0f0f0"; // key background
     context.strokeStyle = "#333";  // border color
-    context.lineWidth = 1;
+    context.lineWidth = getFontSizeInPixels("xs") / 10;
     context.fillRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
     context.strokeRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
 
     context.textBaseline = "middle";
     context.textAlign = "center";
     context.fillStyle = "#333";
-    context.lineWidth = 1;
+    context.lineWidth = getFontSizeInPixels("xs") / 10;
     context.fillText(label, centerX, centerY);
     context.restore();
 }
@@ -1566,7 +1586,7 @@ const renderMovement = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
-    context.font = "32px Consolas";
+    context.font = `${getFontSizeInPixels("xl")}px Consolas`;
     context.fillText("Movement", width / 2, unitHeight);
 
 
@@ -1598,7 +1618,7 @@ const renderMovement = (width, height) => {
  * @param {number} periods
  * @param {number} amplitude
  */
-const renderWavyLine = (startX, startY, endX, endY, periods = 5, amplitude = 5) => {
+const renderWavyLine = (startX, startY, endX, endY, periods, amplitude) => {
     const dx = endX - startX;
     const dy = endY - startY;
     const length = Math.hypot(dx, dy);
@@ -1608,7 +1628,7 @@ const renderWavyLine = (startX, startY, endX, endY, periods = 5, amplitude = 5) 
     context.translate(startX, startY);
     context.rotate(angle);
     context.beginPath();
-    context.lineWidth = 2;
+    context.lineWidth = getFontSizeInPixels("xs") / 5;
 
     for (let i = 0; i <= length; i++) {
         const waveY = Math.sin((i / length) * 2 * Math.PI * periods) * amplitude;
@@ -1671,7 +1691,7 @@ const renderPuzzle = (cx, cy, r) => {
         const angle = Math.PI / 180 * (60 * i + 30);
         const x = cx + 0.6 * r * Math.cos(angle);
         const y = cy + 0.6 * r * Math.sin(angle);
-        context.font = "20px monospace";
+        context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.textAlign = 'center';
         context.textBaseline = 'middle';
         context.fillStyle = "white";
@@ -1683,17 +1703,17 @@ const renderPuzzle = (cx, cy, r) => {
     for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 180 * (60 * i);
 
-        const startX = cx + 20 * Math.cos(angle);
-        const startY = cy + 20 * Math.sin(angle);
+        const startX = cx + 1.5 * getFontSizeInPixels("xs") * Math.cos(angle);
+        const startY = cy + 1.5 * getFontSizeInPixels("xs") * Math.sin(angle);
         const endX = cx + r * Math.cos(angle);
         const endY = cy + r * Math.sin(angle);
 
         if (randomSymbols.lineType === "wavy") {
-            renderWavyLine(startX, startY, endX, endY);
+            renderWavyLine(startX, startY, endX, endY, 5, getFontSizeInPixels("xs") / 2);
         } else {
             switch (randomSymbols.lineType) {
                 case "straight": {
-                    context.lineWidth = 2;
+                    context.lineWidth = getFontSizeInPixels("xs") / 5;
                     context.setLineDash([]);
                     break;
                 }
@@ -1713,8 +1733,8 @@ const renderPuzzle = (cx, cy, r) => {
         }
     }
     context.setLineDash([]);
-    renderCircle(cx, cy, 15, {fill: "white"});
-    context.font = "20px monospace";
+    renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: "white"});
+    context.font = `${getFontSizeInPixels("sm")}px monospace`;
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     //const symbol = symbols[4];
@@ -1730,18 +1750,18 @@ const renderResources = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
-    context.font = "25px monospace";
+    context.font = `${getFontSizeInPixels("md")}px monospace`;
     context.fillText(`Resources`, width / 2, 0);
 
     context.textAlign = 'left';
-    context.font = "20px monospace";
+    context.font = `${getFontSizeInPixels("sm")}px monospace`;
     const texts = [];
     for (const {type, count} of gameState.getResources()) {
         texts.push(`\u2022 ${ItemTexts[type]} ${type.substring(0, 1).toUpperCase() + type.substring(1)}: ${count}`);
     }
 
     texts.forEach((text, idx) => {
-        context.fillText(text, width / 2.5, (idx + 1) * 30 + 10);
+        context.fillText(text, width / 2.5, (idx + 1) * getFontSizeInPixels("lg"));
     });
 
     const unitWidth = width / 2;
@@ -1760,7 +1780,7 @@ const renderResources = (width, height) => {
  */
 const renderHexGrid = (width, height) => {
     context.strokeStyle = "#CECECE";
-    context.lineWidth = 2;
+    context.lineWidth = getFontSizeInPixels("xs") / 5;
     const cols = gameState.cols;
     const rows = gameState.rows;
     const unitWidth = width / 10;
@@ -1779,7 +1799,7 @@ const renderHexGrid = (width, height) => {
             //renderPuzzle(cx, cy, r);
             if (row === gameState.player.row && col === gameState.player.col) {
                 //player, TODO animation
-                renderCircle(cx, cy, 10, {fill: PLAYER_COLOR});
+                renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
             }
             if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
                 context.fillText(`[${row};${col}]`, cx, cy);
@@ -1904,14 +1924,14 @@ const renderHexDraft = (width, height) => {
                 context.textAlign = 'center';
                 context.textBaseline = 'middle';
                 context.fillStyle = "white";
-                context.font = "25px Consolas";
+                context.font = `${getFontSizeInPixels("sm")}px monospace`;
                 context.fillText(Effects[draftedRoom.events.enter].description, cx, textY);
             }
 
             if (draftedRoom.needsKey) {
                 const iconX = (col - 1.25) * unitWidth;
                 const iconY = unitHeight;
-                context.font = "50px monospace";
+                context.font = `${getFontSizeInPixels("lg")}px monospace`;
                 context.textAlign = 'center';
                 context.textBaseline = 'middle';
                 context.fillText(ItemTexts.lock, iconX, iconY);
@@ -1920,7 +1940,7 @@ const renderHexDraft = (width, height) => {
             if (draftedRoom.items.includes("keys")) {
                 const iconX = (col + 1.25) * unitWidth;
                 const iconY = unitHeight;
-                context.font = "50px monospace";
+                context.font = `${getFontSizeInPixels("lg")}px monospace`;
                 context.textAlign = 'center';
                 context.textBaseline = 'middle';
                 context.fillText(ItemTexts.keys, iconX, iconY);
@@ -1941,7 +1961,7 @@ const renderHexDraft = (width, height) => {
         context.textAlign = 'center';
         context.textBaseline = 'middle';
         context.fillStyle = "white";
-        context.font = "26px monospace";
+        context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight);
         context.fillText("[R]", 14.5 * unitWidth, 2 * unitHeight);
     }
@@ -1955,7 +1975,7 @@ const renderHints = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
-    context.font = "20px monospace";
+    context.font = `${getFontSizeInPixels("sm")}px monospace`;
     const texts = [
         "Draft rooms by selecting an option and press [Space] or [Enter].",
         "Some rooms are locked behind a key, so look out for them to help on your journey!",
@@ -1965,7 +1985,7 @@ const renderHints = (width, height) => {
     ];
     const innerUnitHeight = height / texts.length;
     texts.forEach((text, idx) => {
-        context.fillText(text, width / 2, idx * innerUnitHeight + 10);
+        context.fillText(text, width / 2, idx * getFontSizeInPixels("lg") + getFontSizeInPixels("xs"));
     });
 };
 
@@ -2002,9 +2022,9 @@ const render = () => {
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     const {x, y, width, height} = getPlayArea();
-    if (width < 1280) {
-        return false;
-    }
+    // if (width < 1280) {
+    //     return false;
+    // }
 
     const unitWidth = width / 16;
     const unitHeight = height / 9;
@@ -2065,14 +2085,14 @@ const render = () => {
 
     if (DEBUG_MODE) {
         context.strokeStyle = CSS_COLOR_NAMES.Pink;
-        context.lineWidth = 2;
+        context.lineWidth = getFontSizeInPixels("xs") / 5;
 
         for (const [name, rect] of Object.entries(layout)) {
             context.strokeRect(rect.x, rect.y, rect.width, rect.height);
             context.textAlign = 'left';
             context.textBaseline = 'top';
             context.fillStyle = CSS_COLOR_NAMES.Pink;
-            context.font = "25px monospace";
+            context.font = `${getFontSizeInPixels("sm")}px monospace`;
             context.fillText(`[${name}]`, rect.x + 5, rect.y + 5);
         }
     }
@@ -2081,7 +2101,7 @@ const render = () => {
         context.textAlign = 'right';
         context.textBaseline = 'middle';
         context.fillStyle = "white";
-        context.font = "25px Consolas";
+        context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
     }
     return true;
@@ -2189,13 +2209,13 @@ const gameLoop = (timestamp) => {
         context.textAlign = 'center';
         context.textBaseline = 'middle';
         context.fillStyle = CSS_COLOR_NAMES.Red;
-        context.font = "25px monospace";
+        context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2);
     } else {
         context.textAlign = 'left';
         context.textBaseline = 'middle';
         context.fillStyle = CSS_COLOR_NAMES.Pink;
-        context.font = "25px monospace";
+        context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
     }
     requestAnimationFrame(gameLoop);
