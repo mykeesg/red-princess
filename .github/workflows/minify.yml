@@ -18,7 +18,7 @@ jobs:
       - run: npm install terser
 
       - name: Minify JS
-        run: npx terser script.js -o dist/script.min.js --compress --mangle
+        run: npx terser script.js -o dist/script.min.js --compress --mangle --toplevel
 
       - name: Commit minified file
         uses: stefanzweifel/git-auto-commit-action@v6
