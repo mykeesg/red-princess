@@ -99,6 +99,11 @@ let DEBUG_MODE = false;
  */
 
 /**
+ * Represents font scale levels.
+ * @typedef {"xs" | "sm" | "md" | "lg" | "xl"} FontSize
+ */
+
+/**
  * Rectangle drawn on the canvas.
  * @typedef {Object} PuzzlePiece
  * @property {Symbol} innerSymbol - The symbol in the middle of the puzzle
@@ -1964,47 +1969,81 @@ const renderHints = (width, height) => {
     });
 };
 
+/**
+ *
+ * @return {Rectangle} the bounding rectangle for the render part
+ */
+const getPlayArea = () => {
+    const aspectRatio = 16 / 9;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+
+    const canvasAspect = canvasWidth / canvasHeight;
+
+    if (canvasAspect > aspectRatio) {
+        const height = canvasHeight;
+        const width = height * aspectRatio;
+        const x = (canvasWidth - width) / 2;
+        const y = 0;
+        return {x, y, width, height};
+    } else {
+        const width = canvasWidth;
+        const height = width / aspectRatio;
+        const x = 0;
+        const y = (canvasHeight - height) / 2;
+        return {x, y, width, height};
+    }
+};
+
 const render = () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    const unitWidth = canvas.width / 16;
-    const unitHeight = canvas.height / 9;
+    context.fillStyle = CLEAR_COLOR;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const {x, y, width, height} = getPlayArea();
+    if (width < 1280) {
+        return false;
+    }
+
+    const unitWidth = width / 16;
+    const unitHeight = height / 9;
 
     /** @type {Record<string, Rectangle>} */
     const layout = {
         /** @type {Rectangle} */
         draft: {
-            x: 0,
-            y: 0,
-            width: canvas.width,
+            x: x,
+            y: y,
+            width: width,
             height: unitHeight * 2
         },
         /** @type {Rectangle} */
         grid: {
-            x: unitWidth * 3,
-            y: unitHeight * 2,
+            x: x + unitWidth * 3,
+            y: y + unitHeight * 2,
             width: unitWidth * 10,
             height: unitHeight * 5
         },
         /** @type {Rectangle} */
         resources: {
-            x: 0,
-            y: unitHeight * 2,
+            x: x,
+            y: y + unitHeight * 2,
             width: unitWidth * 3,
             height: unitHeight * 5
         },
         /** @type {Rectangle} */
         movement: {
-            x: unitWidth * 13,
-            y: unitHeight * 2,
+            x: x + unitWidth * 13,
+            y: y + unitHeight * 2,
             width: unitWidth * 3,
             height: unitHeight * 5
         },
         /** @type {Rectangle} */
         footer: {
-            x: 0,
-            y: unitHeight * 7,
-            width: canvas.width,
+            x: x,
+            y: y + unitHeight * 7,
+            width: width,
             height: unitHeight * 2
         }
     };
@@ -2014,8 +2053,6 @@ const render = () => {
 
     const tileSize = Math.min(128, Math.floor(Math.min(canvas.width / cols, canvas.height / rows)));
 
-    context.fillStyle = CLEAR_COLOR;
-    context.fillRect(0, 0, canvas.width, canvas.height);
 
     const offsetX = Math.floor((canvas.width - tileSize * cols) / 2);
     const offsetY = Math.floor((canvas.height - tileSize * rows) / 2);
@@ -2047,6 +2084,7 @@ const render = () => {
         context.font = "25px Consolas";
         context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
     }
+    return true;
 };
 
 /**
@@ -2075,7 +2113,10 @@ const handleClick = (event) => {
 /** @type {Object<string, Function>} */
 const globalShortcuts = {
     r: () => gameState.newGame(),
-    h: () => (DEBUG_MODE = !DEBUG_MODE),
+    h: () => {
+        (DEBUG_MODE = !DEBUG_MODE);
+        canvas.style.cursor = DEBUG_MODE ? "pointer" : "default";
+    },
     g: () => gameState.addResource("gems", 5),
     k: () => gameState.addResource("keys", 5)
 };
@@ -2144,12 +2185,19 @@ const gameLoop = (timestamp) => {
     lastFrameTime = timestamp;
     gameState.lastTimeStamp = timestamp;
     update(timestamp);
-    render();
-    context.textAlign = 'left';
-    context.textBaseline = 'middle';
-    context.fillStyle = CSS_COLOR_NAMES.Pink;
-    context.font = "25px monospace";
-    context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
+    if (!render()) {
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillStyle = CSS_COLOR_NAMES.Red;
+        context.font = "25px monospace";
+        context.fillText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2);
+    } else {
+        context.textAlign = 'left';
+        context.textBaseline = 'middle';
+        context.fillStyle = CSS_COLOR_NAMES.Pink;
+        context.font = "25px monospace";
+        context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
+    }
     requestAnimationFrame(gameLoop);
 }
 
