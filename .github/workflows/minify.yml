@@ -1,0 +1,27 @@
+name: Minify and Commit
+on: [ push ]
+permissions:
+  contents: write
+jobs:
+  minify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - run: npm install terser
+
+      - name: Minify JS
+        run: npx terser script.js -o dist/script.min.js --compress --mangle --toplevel
+
+      - name: Commit minified file
+        uses: stefanzweifel/git-auto-commit-action@v6
+        with:
+          commit_message: "[bot] Minified JS file – auto-commit from your CI pipeline 🤖🛠️"
+          file_pattern: "dist/script.min.js"
