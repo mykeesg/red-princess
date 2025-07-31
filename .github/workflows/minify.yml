@@ -1,5 +1,8 @@
 name: Minify and Commit
-on: [ push ]
+on:
+  push:
+    paths:
+      - 'script.js'
 permissions:
   contents: write
 jobs:
