@@ -12,13 +12,6 @@ let DEBUG_FLAG_ONCE = true;
  */
 
 /**
- *
- * @param {Coord} coord
- * @return {string} the string representation of the given coordinate
- */
-const coordToString = (coord) => `[${coord.row};${coord.col}]`;
-
-/**
  * A Point on the canvas, identified by its x and y position.
  * @typedef {Object} Point2D
  * @property {number} x - The x coordinate (horizontal).
@@ -177,6 +170,21 @@ const AltSymbolTexts = {
  */
 const isInside = (x, y, rect) =>
     rect.x <= x && rect.y <= y && x <= rect.x + rect.width && y <= rect.y + rect.height;
+
+/**
+ *
+ * @param {Coord} coord
+ * @return {string} the string representation of the given coordinate
+ */
+const coordToString = (coord) => `[${coord.row};${coord.col}]`;
+
+/**
+ *
+ * @param {Coord} coord1
+ * @param {Coord} coord2
+ * @return {boolean} if the two coords are the same, false otherwise
+ */
+const areEqualCoords = (coord1, coord2) => coord1.row === coord2.row && coord1.col === coord2.col;
 
 class SeededRNG {
     /**
@@ -1834,18 +1842,27 @@ const renderHexGrid = (width, height) => {
                 //player, TODO animation
                 renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
             }
-            if (DEBUG_MODE && gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
-                context.fillStyle = "white";
-                context.textBaseline = 'middle';
-                context.textAlign = 'center';
-                context.fillText(`[${row};${col}]`, cx, cy);
+            if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
+                if (DEBUG_MODE) {
+                    context.fillStyle = "white";
+                    context.textBaseline = 'middle';
+                    context.textAlign = 'center';
+                    context.fillText(`[${row};${col}]`, cx, cy);
+                }
+
+                // FIXME: only render on valid neighbor tiles that are unrevealed but connected
+                if (gameState.getState() === "move" && DIRECTION_VALUES.some((direction) => areEqualCoords(tileTowards(gameState.player, direction), {
+                    row: row,
+                    col: col
+                }))) {
+                    renderHexagon(cx, cy, 0.75 * r, {fill: ROOM_COLORS.draft});
+                }
             }
 
             if (gameState.getState() === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
                 context.save();
                 context.fillStyle = ROOM_COLORS.draft;
                 context.globalAlpha = selectionAlpha;
-                //renderHexagon(cx, cy, 0.75*r, {fill: ROOM_COLORS.draft});
                 renderHexRoom(cx, cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
                 context.restore();
             }
@@ -2197,6 +2214,13 @@ const handleMouseMove = (event) => {
     gameState.mouseGridRow = mouseCoord.row;
     gameState.mouseGridCol = mouseCoord.col;
 
+    if (gameState.validCoord(mouseCoord)) {
+        if (DIRECTION_VALUES.some((direction) => areEqualCoords(tileTowards(gameState.player, direction), mouseCoord))) {
+            canvas.style.cursor = "pointer";
+        } else {
+            canvas.style.cursor = "default";
+        }
+    }
 };
 
 /**
@@ -2205,10 +2229,19 @@ const handleMouseMove = (event) => {
  */
 const handleClick = (event) => {
     if (gameState.getState() === "move") {
-        if (gameState.valid(gameState.mouseGridRow, gameState.mouseGridCol)) {
-            console.log(`Move [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
-        } else {
-            console.log(`Cannot move to [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
+        /**
+         * @type {Coord}
+         */
+        const mouseCoord = {row: gameState.mouseGridRow, col: gameState.mouseGridCol};
+        if (gameState.validCoord(mouseCoord)) {
+            DIRECTION_VALUES.some((direction) => {
+                const neighborPos = tileTowards(gameState.player, direction);
+                if (areEqualCoords(neighborPos, mouseCoord)) {
+                    updatePlayerPosition(direction);
+                    return true;
+                }
+                return false;
+            });
         }
     }
 };
@@ -2218,7 +2251,6 @@ const globalShortcuts = {
     r: () => gameState.newGame(),
     h: () => {
         (DEBUG_MODE = !DEBUG_MODE);
-        canvas.style.cursor = DEBUG_MODE ? "pointer" : "default";
     },
     g: () => gameState.addResource("gems", 5),
     k: () => gameState.addResource("keys", 5)
@@ -2307,7 +2339,7 @@ const gameLoop = (timestamp) => {
 const run = async () => {
     document.addEventListener("keydown", handleInput);
     document.addEventListener("mousemove", handleMouseMove);
-    //document.addEventListener("mousedown", handleClick);
+    document.addEventListener("mouseup", handleClick);
 
     gameLoop(0);
 };
