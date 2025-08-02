@@ -2,12 +2,27 @@
 // noinspection UnnecessaryLocalVariableJS, UnnecessaryReturnStatementJS
 
 let DEBUG_MODE = false;
+let DEBUG_FLAG_ONCE = true;
 
 /**
  * A coordinate on the grid, identified by its row and column.
  * @typedef {Object} Coord
  * @property {number} row - The row index within the grid.
  * @property {number} col - The column index within the grid.
+ */
+
+/**
+ *
+ * @param {Coord} coord
+ * @return {string} the string representation of the given coordinate
+ */
+const coordToString = (coord) => `[${coord.row};${coord.col}]`;
+
+/**
+ * A Point on the canvas, identified by its x and y position.
+ * @typedef {Object} Point2D
+ * @property {number} x - The x coordinate (horizontal).
+ * @property {number} y - The y coordinate (vertical).
  */
 
 /**
@@ -785,18 +800,6 @@ class Game {
     #draft;
 
     /**
-     * Mouse X position relative to the canvas.
-     * @type {number}
-     */
-    mouseX;
-
-    /**
-     * Mouse Y position relative to the canvas.
-     * @type {number}
-     */
-    mouseY;
-
-    /**
      * Grid row index beneath the mouse pointer.
      * @type {number}
      */
@@ -873,8 +876,6 @@ class Game {
             "gems": 0,
         };
 
-        this.mouseX = -1;
-        this.mouseY = -1;
         this.mouseGridRow = -1;
         this.mouseGridCol = -1;
 
@@ -893,10 +894,18 @@ class Game {
         return this.#cols;
     }
 
+    /**
+     *
+     * @return {Coord}
+     */
     get player() {
         return this.#player;
     }
 
+    /**
+     *
+     * @return {Coord}
+     */
     get exit() {
         return this.#exit;
     }
@@ -1360,6 +1369,30 @@ const update = (delta) => {
     // gameState.mouseGridCol = -1;
 };
 
+class Renderer {
+    /** @type {Record<string, Rectangle>} */
+    layout;
+
+    /**
+     * @type {Point2D}
+     */
+    mousePosition;
+
+    /**
+     * @type {number}
+     */
+    unitWidth;
+
+    /**
+     * @type {number}
+     */
+    unitHeight;
+
+    constructor() {
+        this.mousePosition = {x: -1, y: -1};
+    }
+}
+
 /**
  *
  * @param {number} from
@@ -1681,7 +1714,7 @@ const renderPuzzle = (cx, cy, r) => {
     const symbols = Object.values(SymbolTexts);
     const altSymbols = Object.values(AltSymbolTexts);
 
-    const coords = `[${gameState.player.row};${gameState.player.col}]`;
+    const coords = coordToString(gameState.player);
     const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
 
     renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
@@ -1801,7 +1834,10 @@ const renderHexGrid = (width, height) => {
                 //player, TODO animation
                 renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
             }
-            if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
+            if (DEBUG_MODE && gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
+                context.fillStyle = "white";
+                context.textBaseline = 'middle';
+                context.textAlign = 'center';
                 context.fillText(`[${row};${col}]`, cx, cy);
             }
 
@@ -1821,26 +1857,27 @@ let selectionAlpha = 1;
 let refreshRotation = 0;
 
 /**
+ * Converts mouse coordinates to grid coordinates for flat-topped hexes
+ * with even columns shifted down and origin at (r, r).
  * @param {number} mouseX
  * @param {number} mouseY
- * @param {number} r
- * @return {Coord}
+ * @param {number} r - Radius of the hexagon (half the width)
+ * @returns {Coord}
  */
 const mouseToGrid = (mouseX, mouseY, r) => {
-    const rows = gameState.rows;
-    const cols = gameState.cols;
-
-    const hexHeight = Math.sqrt(3) * r;
-    const rowOffset = hexHeight / 2;
-
-    const col = Math.floor((mouseX - r) / (1.5 * r));
-    const offsetY = ((col % 2) + 1) * rowOffset;
-    const row = Math.floor((mouseY - offsetY) / hexHeight + 0.5);
-
-    return {
-        row: Math.max(0, Math.min(rows - 1, row)),
-        col: Math.max(0, Math.min(cols - 1, col))
-    };
+    for (let row = 0; row < gameState.rows; row++) {
+        for (let col = 0; col < gameState.cols; col++) {
+            /**
+             *
+             * @type {Coord}
+             */
+            const coord = {row: row, col: col};
+            if (context.isPointInPath(HEX_GRID_PATHS.get(coordToString(coord)), mouseX, mouseY)) {
+                return coord;
+            }
+        }
+    }
+    return {row: -1, col: -1};
 };
 
 
@@ -2015,6 +2052,13 @@ const getPlayArea = () => {
     }
 };
 
+/**
+ *
+ * @type {Map<string, Path2D>}
+ */
+const HEX_GRID_PATHS = new Map();
+
+
 const render = () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -2068,6 +2112,10 @@ const render = () => {
         }
     };
 
+    renderer.layout = layout;
+    renderer.unitWidth = unitWidth;
+    renderer.unitHeight = unitHeight;
+
     const rows = gameState.rows;
     const cols = gameState.cols;
 
@@ -2104,16 +2152,51 @@ const render = () => {
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
     }
+    if (DEBUG_FLAG_ONCE) {
+        const r = unitWidth / 2;
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const hexHeight = Math.sqrt(3) * r;
+                const rowOffset = hexHeight / 2;
+                const cx = (1.5 * col + 1) * r;
+                //Shift items in even columns 1 unit down. Center is offset as well.
+                const offsetY = ((col % 2) + 1) * rowOffset;
+                const cy = (row * hexHeight) + offsetY;
+
+                const path = new Path2D();
+                for (let i = 0; i < 6; i++) {
+                    const angle = Math.PI / 180 * (60 * i);
+                    const x = cx + r * Math.cos(angle);
+                    const y = cy + r * Math.sin(angle);
+                    if (i === 0) path.moveTo(x, y);
+                    else path.lineTo(x, y);
+                }
+                path.closePath();
+                HEX_GRID_PATHS.set(coordToString({row: row, col: col}), path);
+            }
+        }
+    }
+    DEBUG_FLAG_ONCE = false;
     return true;
 };
 
 /**
  *
+ * @type {Renderer}
+ */
+const renderer = new Renderer();
+
+/**
+ *
  * @param {MouseEvent} event
  */
-const handleMove = (event) => {
-    gameState.mouseX = event.offsetX;
-    gameState.mouseY = event.offsetY;
+const handleMouseMove = (event) => {
+    const x = event.offsetX - renderer.layout.grid.x;
+    const y = event.offsetY - renderer.layout.grid.y;
+    const mouseCoord = mouseToGrid(x, y, renderer.unitWidth / 2);
+    gameState.mouseGridRow = mouseCoord.row;
+    gameState.mouseGridCol = mouseCoord.col;
+
 };
 
 /**
@@ -2223,7 +2306,7 @@ const gameLoop = (timestamp) => {
 
 const run = async () => {
     document.addEventListener("keydown", handleInput);
-    //document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mousemove", handleMouseMove);
     //document.addEventListener("mousedown", handleClick);
 
     gameLoop(0);
