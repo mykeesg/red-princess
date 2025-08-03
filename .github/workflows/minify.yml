@@ -1,6 +1,8 @@
 name: Minify and Commit
 on:
   push:
+    branches:
+      - main
     paths:
       - 'script.js'
 permissions:
