@@ -1894,7 +1894,6 @@ const renderHexGrid = (width, height) => {
     const cols = gameState.cols;
     const rows = gameState.rows;
     const unitWidth = width / 10;
-    const unitHeight = height / 5;
     const r = unitWidth / 2;
 
     for (let row = 0; row < rows; row++) {
@@ -1954,10 +1953,9 @@ let refreshRotation = 0;
  * with even columns shifted down and origin at (r, r).
  * @param {number} mouseX
  * @param {number} mouseY
- * @param {number} r - Radius of the hexagon (half the width)
  * @returns {Coord}
  */
-const mouseToGrid = (mouseX, mouseY, r) => {
+const mouseToGrid = (mouseX, mouseY) => {
     for (let row = 0; row < gameState.rows; row++) {
         for (let col = 0; col < gameState.cols; col++) {
             /**
@@ -2113,7 +2111,6 @@ const renderHints = (width, height) => {
         "Red paths are blocked from the other side. Gray ones are yet unvisited, while whites are already known.",
         "Do not be afraid to explore for additional resources!"
     ];
-    const innerUnitHeight = height / texts.length;
     texts.forEach((text, idx) => {
         context.fillText(text, width / 2, idx * getFontSizeInPixels("lg") + getFontSizeInPixels("xs"));
     });
@@ -2290,7 +2287,7 @@ const renderer = new Renderer();
 const handleMouseMove = (event) => {
     const x = event.offsetX - renderer.layout.grid.x;
     const y = event.offsetY - renderer.layout.grid.y;
-    const mouseCoord = mouseToGrid(x, y, renderer.unitWidth / 2);
+    const mouseCoord = mouseToGrid(x, y);
     gameState.mouseGridRow = mouseCoord.row;
     gameState.mouseGridCol = mouseCoord.col;
     if (gameState.getState() === "move" && gameState.validCoord(mouseCoord)) {
