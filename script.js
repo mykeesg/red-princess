@@ -186,6 +186,22 @@ const coordToString = (coord) => `[${coord.row};${coord.col}]`;
  */
 const areEqualCoords = (coord1, coord2) => coord1.row === coord2.row && coord1.col === coord2.col;
 
+/**
+ *
+ * @param {Coord} coord1
+ * @param {Coord} coord2
+ * @return {boolean} if the two coords are neighbors on the grid, false otherwise
+ */
+const areNeighbors = (coord1, coord2) => DIRECTION_VALUES.some((direction) => areEqualCoords(tileTowards(coord1, direction), coord2));
+
+/**
+ *
+ * @param origin the origin to check the direction from
+ * @param coord the coord to check towards to
+ * @return {Direction | undefined} if they are neighbors, the proper direction, undefined otherwise
+ */
+const getDirection = (origin, coord) => DIRECTION_VALUES.find((direction) => areEqualCoords(tileTowards(origin, direction), coord))
+
 class SeededRNG {
     /**
      * The current seed used by the generator
@@ -1168,6 +1184,49 @@ class Game {
     set lastEffect(value) {
         this.#lastEffect = value;
     }
+
+    /**
+     *
+     * @return {Room}
+     */
+    get playerRoom() {
+        return this.atCoord(this.#player);
+    }
+
+    /**
+     *
+     * @param {Direction} direction
+     * @return {boolean} true if so, false otherwise
+     */
+    canPlayerDraftTowards(direction) {
+        if (!direction) {
+            return false;
+        }
+        /**
+         *
+         * @type {Coord}
+         */
+        const neighborCoords = tileTowards(this.player, direction);
+        if (!this.validCoord(neighborCoords)) {
+            return false;
+        }
+
+        /**
+         *
+         * @type {Room}
+         */
+        const neighborRoom = this.atCoord(neighborCoords);
+        if (neighborRoom.revealed) {
+            return false;
+        }
+
+        /**
+         *
+         * @type {Room}
+         */
+        const playerRoom = this.playerRoom;
+        return playerRoom.hallways[direction].enabled && playerRoom.hallways[direction].status === "unknown";
+    }
 }
 
 /** @type {Game} */
@@ -1843,19 +1902,26 @@ const renderHexGrid = (width, height) => {
                 renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
             }
             if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
+                /**
+                 *
+                 * @type {Coord}
+                 */
+                const currentCoord = {
+                    row: row,
+                    col: col
+                };
                 if (DEBUG_MODE) {
                     context.fillStyle = "white";
                     context.textBaseline = 'middle';
                     context.textAlign = 'center';
-                    context.fillText(`[${row};${col}]`, cx, cy);
+                    context.fillText(coordToString(currentCoord), cx, cy);
                 }
 
-                // FIXME: only render on valid neighbor tiles that are unrevealed but connected
-                if (gameState.getState() === "move" && DIRECTION_VALUES.some((direction) => areEqualCoords(tileTowards(gameState.player, direction), {
-                    row: row,
-                    col: col
-                }))) {
+                if (gameState.getState() === "move" && gameState.canPlayerDraftTowards(getDirection(gameState.player, currentCoord))) {
+                    context.save();
+                    context.globalAlpha = selectionAlpha;
                     renderHexagon(cx, cy, 0.75 * r, {fill: ROOM_COLORS.draft});
+                    context.restore();
                 }
             }
 
@@ -2213,13 +2279,16 @@ const handleMouseMove = (event) => {
     const mouseCoord = mouseToGrid(x, y, renderer.unitWidth / 2);
     gameState.mouseGridRow = mouseCoord.row;
     gameState.mouseGridCol = mouseCoord.col;
-
-    if (gameState.validCoord(mouseCoord)) {
-        if (DIRECTION_VALUES.some((direction) => areEqualCoords(tileTowards(gameState.player, direction), mouseCoord))) {
+    if (gameState.getState() === "move" && gameState.validCoord(mouseCoord)) {
+        if (gameState.canPlayerDraftTowards(getDirection(gameState.player, mouseCoord))) {
+            canvas.style.cursor = "pointer";
+        } else if (areNeighbors(gameState.player, mouseCoord) && gameState.atCoord(mouseCoord).revealed) {
             canvas.style.cursor = "pointer";
         } else {
             canvas.style.cursor = "default";
         }
+    } else {
+        canvas.style.cursor = "default";
     }
 };
 
