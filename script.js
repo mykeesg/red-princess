@@ -2,7 +2,7 @@
 // noinspection UnnecessaryLocalVariableJS, UnnecessaryReturnStatementJS
 
 let DEBUG_MODE = false;
-let DEBUG_FLAG_ONCE = true;
+let RENDER_AREA_HAS_BEEN_RESIZED = true;
 
 /**
  * A coordinate on the grid, identified by its row and column.
@@ -1455,6 +1455,16 @@ class Renderer {
      */
     unitHeight;
 
+    /**
+     * @type {number}
+     */
+    canvasWidth;
+
+    /**
+     * @type {number}
+     */
+    canvasHeight;
+
     constructor() {
         this.mousePosition = {x: -1, y: -1};
     }
@@ -2136,68 +2146,71 @@ const getPlayArea = () => {
 };
 
 /**
- *
+ * Precalculated map of paths, used to check mouse position against the hexes.
  * @type {Map<string, Path2D>}
  */
 const HEX_GRID_PATHS = new Map();
 
 
 const render = () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    if (RENDER_AREA_HAS_BEEN_RESIZED) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const {x, y, width, height} = getPlayArea();
+        const unitWidth = width / 16;
+        const unitHeight = height / 9;
+
+        /** @type {Record<string, Rectangle>} */
+        const layout = {
+            /** @type {Rectangle} */
+            draft: {
+                x: x,
+                y: y,
+                width: width,
+                height: unitHeight * 2
+            },
+            /** @type {Rectangle} */
+            grid: {
+                x: x + unitWidth * 3,
+                y: y + unitHeight * 2,
+                width: unitWidth * 10,
+                height: unitHeight * 5
+            },
+            /** @type {Rectangle} */
+            resources: {
+                x: x,
+                y: y + unitHeight * 2,
+                width: unitWidth * 3,
+                height: unitHeight * 5
+            },
+            /** @type {Rectangle} */
+            movement: {
+                x: x + unitWidth * 13,
+                y: y + unitHeight * 2,
+                width: unitWidth * 3,
+                height: unitHeight * 5
+            },
+            /** @type {Rectangle} */
+            footer: {
+                x: x,
+                y: y + unitHeight * 7,
+                width: width,
+                height: unitHeight * 2
+            }
+        };
+
+        renderer.layout = layout;
+        renderer.unitWidth = unitWidth;
+        renderer.unitHeight = unitHeight;
+        renderer.canvasWidth = canvas.width;
+        renderer.canvasHeight = canvas.height;
+    }
     context.fillStyle = CLEAR_COLOR;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
-    const {x, y, width, height} = getPlayArea();
-    // if (width < 1280) {
-    //     return false;
-    // }
-
-    const unitWidth = width / 16;
-    const unitHeight = height / 9;
+    context.fillRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
 
     /** @type {Record<string, Rectangle>} */
-    const layout = {
-        /** @type {Rectangle} */
-        draft: {
-            x: x,
-            y: y,
-            width: width,
-            height: unitHeight * 2
-        },
-        /** @type {Rectangle} */
-        grid: {
-            x: x + unitWidth * 3,
-            y: y + unitHeight * 2,
-            width: unitWidth * 10,
-            height: unitHeight * 5
-        },
-        /** @type {Rectangle} */
-        resources: {
-            x: x,
-            y: y + unitHeight * 2,
-            width: unitWidth * 3,
-            height: unitHeight * 5
-        },
-        /** @type {Rectangle} */
-        movement: {
-            x: x + unitWidth * 13,
-            y: y + unitHeight * 2,
-            width: unitWidth * 3,
-            height: unitHeight * 5
-        },
-        /** @type {Rectangle} */
-        footer: {
-            x: x,
-            y: y + unitHeight * 7,
-            width: width,
-            height: unitHeight * 2
-        }
-    };
-
-    renderer.layout = layout;
-    renderer.unitWidth = unitWidth;
-    renderer.unitHeight = unitHeight;
+    const layout = renderer.layout;
 
     const rows = gameState.rows;
     const cols = gameState.cols;
@@ -2235,8 +2248,9 @@ const render = () => {
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
     }
-    if (DEBUG_FLAG_ONCE) {
-        const r = unitWidth / 2;
+    if (RENDER_AREA_HAS_BEEN_RESIZED) {
+        HEX_GRID_PATHS.clear();
+        const r = renderer.unitWidth / 2;
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
                 const hexHeight = Math.sqrt(3) * r;
@@ -2259,7 +2273,7 @@ const render = () => {
             }
         }
     }
-    DEBUG_FLAG_ONCE = false;
+    RENDER_AREA_HAS_BEEN_RESIZED = false;
     return true;
 };
 
@@ -2290,6 +2304,10 @@ const handleMouseMove = (event) => {
     } else {
         canvas.style.cursor = "default";
     }
+};
+
+const handleResize = () => {
+    RENDER_AREA_HAS_BEEN_RESIZED = true;
 };
 
 /**
@@ -2397,10 +2415,10 @@ const gameLoop = (timestamp) => {
         context.fillText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2);
     } else {
         context.textAlign = 'left';
-        context.textBaseline = 'middle';
+        context.textBaseline = 'top';
         context.fillStyle = CSS_COLOR_NAMES.Pink;
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
+        context.fillText(`FPS: ${Math.round(fps)}`, renderer.layout.draft.x, renderer.layout.draft.y);
     }
     requestAnimationFrame(gameLoop);
 }
@@ -2409,6 +2427,7 @@ const run = async () => {
     document.addEventListener("keydown", handleInput);
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleClick);
+    window.addEventListener("resize", handleResize);
 
     gameLoop(0);
 };
