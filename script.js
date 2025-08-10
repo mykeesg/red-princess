@@ -98,11 +98,13 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
  */
 
 /**
+ * Represents primary visual symbols used to identify the main room effect
  * @typedef {"spiral" | "diamond" | "loop" | "bright" | "circle" | "square"} Symbol
  */
 
 
 /**
+ * Represents alternate symbols that may appear in rooms
  * @typedef {"target" | "star" | "slash" | "paint" | "egg" | "grid"} AltSymbol
  */
 
@@ -408,7 +410,6 @@ class Tween {
         const eased = this.ease(t);
         const value = this.from + (this.to - this.from) * eased;
 
-        // console.log(`Updating with value ${value} of type ${this.type}`);
         this.onUpdate(value);
 
         if (t === 1) {
@@ -463,8 +464,10 @@ class Room {
     needsKey;
     /** @type {Item[]} */
     items;
+    /** @type {Coord} */
+    coord;
 
-    /** @param {{events: Record<RoomEvent, string>, hallways: Record<Direction, Hallway>, revealed: boolean, triggerCount: number, needsKey: boolean, items: Item[]} | undefined} values */
+    /** @param {Room | undefined} values */
     constructor(values = undefined) {
         if (!!values) {
             this.events = values.events;
@@ -473,6 +476,7 @@ class Room {
             this.triggerCount = values.triggerCount;
             this.needsKey = values.needsKey;
             this.items = values.items;
+            this.coord = values.coord;
         } else {
             this.#defaults();
         }
@@ -496,6 +500,7 @@ class Room {
         this.triggerCount = 0;
         this.needsKey = false;
         this.items = [];
+        this.coord = {row: -1, col: -1};
 
     }
 
@@ -844,8 +849,14 @@ class Game {
         this.#cols = 13;
 
         this.#grid = Array.from({length: this.#rows},
-            () => Array.from({length: this.#cols},
-                () => (new Room()))
+            (_, row) => Array.from({length: this.#cols},
+                (_, col) => {
+                    /** @type {Room}*/
+                    const room = new Room();
+                    room.coord.row = row;
+                    room.coord.col = col;
+                    return room;
+                })
         );
 
         this.#player = {row: 2, col: 0};
@@ -981,13 +992,11 @@ class Game {
 
     /**
      *
-     * @param {number} row
-     * @param {number} col
      * @param {Room} room
      */
-    placeRoom(row, col, room) {
-        if (this.valid(row, col)) {
-            this.#grid[row][col] = room;
+    placeRoom(room) {
+        if (this.validCoord(room.coord)) {
+            this.#grid[room.coord.row][room.coord.col] = room;
         }
     }
 
@@ -1357,7 +1366,8 @@ const generateDraftRoom = (index, direction) => {
     room.hallways[opposite(direction)].enabled = true;
     room.hallways[opposite(direction)].status = "open";
     room.needsKey = purpose !== "extraKey" && randomBool();
-
+    room.coord.row = -1;
+    room.coord.col = index;
 }
 
 const refreshDrafts = () => {
@@ -1365,9 +1375,10 @@ const refreshDrafts = () => {
     gameState.draft.index = 0;
     let canDraft = true;
     do {
-        generateDraftRoom(0, direction);
-        generateDraftRoom(1, direction);
-        generateDraftRoom(2, direction);
+        for (let i = 0; i < gameState.draft.options.length; i++) {
+            HEX_TILE_CACHE.delete(coordToString({row: -1, col: i}));
+            generateDraftRoom(i, direction);
+        }
         canDraft = gameState.getResource("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
     } while (!canDraft);
 }
@@ -1394,6 +1405,8 @@ const updatePlayerPosition = (direction) => {
             at(newPosition).enter();
             gameState.movePlayerToCoord(newPosition);
             gameState.removeResource("steps");
+            // TODO move it from here
+            renderer.nextSprite();
         }
     }
 }
@@ -1407,7 +1420,9 @@ const placeRoom = () => {
         newRoom.needsKey = false;
         gameState.removeResource("keys");
     }
-    gameState.placeRoom(gameState.draft.position.row, gameState.draft.position.col, newRoom);
+    newRoom.coord.row = gameState.draft.position.row;
+    newRoom.coord.col = gameState.draft.position.col;
+    gameState.placeRoom(newRoom);
     updatePlayerPosition(gameState.draft.direction);
     gameState.draft.index = 0;
     DIRECTION_VALUES.forEach(direction => {
@@ -1465,8 +1480,39 @@ class Renderer {
      */
     canvasHeight;
 
+    /** @type {HTMLImageElement} */
+    spriteSheet;
+
+    // 512 x 854
+    // 342 px of "space" above
+    // spriteWidth = 512;
+    // spriteHeight = 854;
+
+    spriteWidth = 32;
+    spriteHeight = 48;
+
+    renderedSpriteRow = 0;
+    renderedSpriteCol = 0;
+
+    maxSpriteRow = 5;
+    maxSpriteCol = 8;
+
+    useSprites = false;
+
     constructor() {
         this.mousePosition = {x: -1, y: -1};
+    }
+
+    nextSprite() {
+        const spriteCount = this.maxSpriteRow * this.maxSpriteCol;
+        const index = (this.renderedSpriteRow * this.maxSpriteCol + this.renderedSpriteCol + 1) % spriteCount;
+
+        this.renderedSpriteRow = Math.floor(index / this.maxSpriteCol);
+        this.renderedSpriteCol = index % this.maxSpriteCol;
+    }
+
+    isReady() {
+        return !RENDER_AREA_HAS_BEEN_RESIZED;
     }
 }
 
@@ -1571,10 +1617,14 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
  */
 const renderHexRoom = (cx, cy, r, room, borders = false) => {
     if (room.revealed) {
-        renderHexagon(cx, cy, r, {
-            fill: ROOM_COLORS[room.events.enter],
-            ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
-        });
+        if (renderer.useSprites) {
+            renderHexTileImage(cx, cy, r, room.coord, room.events["enter"]);
+        } else {
+            renderHexagon(cx, cy, r, {
+                fill: ROOM_COLORS[room.events.enter],
+                ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
+            });
+        }
         DIRECTION_VALUES.forEach((direction) => {
             renderHallway(room.hallways[direction], cx, cy, r, direction);
         });
@@ -1794,6 +1844,12 @@ const renderPuzzle = (cx, cy, r) => {
     const coords = coordToString(gameState.player);
     const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
 
+    if (context !== null) {
+        renderHexTileImage(cx, cy, r, gameState.player, gameState.playerRoom.events["enter"]);
+        return;
+    }
+
+    // temporarily disabled without linter complaints
     renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
 
     context.setLineDash([lineLength, spaceLength]);
@@ -1850,6 +1906,71 @@ const renderPuzzle = (cx, cy, r) => {
     //const symbol = symbols[4];
     context.fillText(`${randomSymbols.innerSymbol}`, cx, cy);
 };
+
+
+/** @type {Map<string, Coord>} */
+const HEX_TILE_CACHE = new Map();
+
+/** @type {Record<string, Coord[]>} */
+const HEX_TILE_OPTIONS = {
+    "extraSteps": [{row: 3, col: 4}],
+    "extraKey": [{row: 3, col: 6}],
+    "money": [{row: 2, col: 6}],
+    "taxes": [{row: 1, col: 2}],
+    "garden": [{row: 4, col: 7}],
+    "shop": [{row: 1, col: 0}],
+    "start": [{row: 4, col: 7}],
+    "exit": [{row: 2, col: 7}],
+    "noop": [{row: 0, col: 0}],
+};
+
+/**
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {Coord} coord
+ * @param {RoomEvent} purpose
+ */
+const renderHexTileImage = (cx, cy, r, coord, purpose) => {
+    const tx = renderer.spriteWidth / 2;
+    const ty = renderer.spriteHeight - tx;
+
+    const targetWidth = 2 * r;
+    const scale = Math.round(targetWidth / renderer.spriteWidth * 100) / 100;
+    const targetHeight = renderer.spriteHeight * scale;
+
+    const dx = cx - tx * scale;
+    const dy = cy - ty * scale;
+
+    let spriteRow;
+    let spriteCol;
+
+    const coordStr = coordToString(coord);
+    if (HEX_TILE_CACHE.has(coordStr)) {
+        /** @type {Coord} */
+        const tile = HEX_TILE_CACHE.get(coordStr);
+        spriteRow = tile.row;
+        spriteCol = tile.col;
+    } else {
+        /** @type {Coord} */
+        const randomTile = randomElement(HEX_TILE_OPTIONS[purpose]);
+        spriteRow = randomTile.row;
+        spriteCol = randomTile.col;
+        HEX_TILE_CACHE.set(coordStr, randomTile);
+    }
+
+    context.drawImage(
+        renderer.spriteSheet,
+        spriteCol * renderer.spriteWidth,
+        spriteRow * renderer.spriteHeight + 1,
+        renderer.spriteWidth,
+        renderer.spriteHeight,
+        dx,
+        dy,
+        targetWidth,
+        targetHeight
+    );
+}
 
 /**
  *
@@ -2153,6 +2274,7 @@ const render = () => {
     if (RENDER_AREA_HAS_BEEN_RESIZED) {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
+        context.imageSmoothingEnabled = false;
 
         const {x, y, width, height} = getPlayArea();
         const unitWidth = width / 16;
@@ -2285,6 +2407,10 @@ const renderer = new Renderer();
  * @param {MouseEvent} event
  */
 const handleMouseMove = (event) => {
+    if (!renderer.isReady()) {
+        return;
+    }
+    renderer.mousePosition = {x: event.offsetX, y: event.offsetY};
     const x = event.offsetX - renderer.layout.grid.x;
     const y = event.offsetY - renderer.layout.grid.y;
     const mouseCoord = mouseToGrid(x, y);
@@ -2312,6 +2438,9 @@ const handleResize = () => {
  * @param {MouseEvent} event
  */
 const handleClick = (event) => {
+    if (!renderer.isReady()) {
+        return;
+    }
     if (gameState.getState() === "move") {
         /**
          * @type {Coord}
@@ -2328,70 +2457,127 @@ const handleClick = (event) => {
             });
         }
     }
-};
 
-/** @type {Object<string, Function>} */
-const globalShortcuts = {
-    r: () => gameState.newGame(),
-    h: () => {
-        (DEBUG_MODE = !DEBUG_MODE);
-    },
-    g: () => gameState.addResource("gems", 5),
-    k: () => gameState.addResource("keys", 5)
-};
-
-/** @type {Record<string, Function>} */
-const moveControls = {
-    w: () => updatePlayerPosition("NORTH"),
-    ArrowUp: () => updatePlayerPosition("NORTH"),
-    e: () => updatePlayerPosition("NORTH_EAST"),
-    d: () => updatePlayerPosition("SOUTH_EAST"),
-    s: () => updatePlayerPosition("SOUTH"),
-    ArrowDown: () => updatePlayerPosition("SOUTH"),
-    a: () => updatePlayerPosition("SOUTH_WEST"),
-    q: () => updatePlayerPosition("NORTH_WEST")
-};
-
-/** @type {Record<string, Function>} */
-const draftControls = {
-    d: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
-    ArrowRight: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
-    a: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
-    ArrowLeft: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
-    " ": () => placeRoom(),
-    Enter: () => placeRoom(),
-    r: () => {
-        if (gameState.getResource("gems") >= 2) {
-            gameState.removeResource("gems", 2);
-            refreshDrafts();
-        }
+    const rectSize = getFontSizeInPixels("sm");
+    /** @type {Rectangle} */
+    const rect = {
+        x: renderer.layout.draft.width - 2 * rectSize,
+        y: renderer.layout.draft.y + rectSize,
+        width: rectSize,
+        height: rectSize,
+    };
+    if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+        renderer.useSprites = !renderer.useSprites;
     }
+
 };
+
+/** @typedef {GameState | "global"} HotkeyScope */
+/**
+ * Represents the active state of a keyboard hotkey and its behavior in the game.
+ */
+class GameKeyInput {
+    /**
+     * The scope in which the hotkey is active.
+     * Examples: `"global"`, `"movement"`, `"drafting"`.
+     * @type {HotkeyScope}
+     */
+    scope;
+
+    /**
+     * A short, human-readable name for the hotkey.
+     * @type {string}
+     */
+    name;
+
+    /**
+     * A detailed description of what the hotkey does.
+     * @type {string}
+     */
+    description;
+
+    /**
+     * The actual key value as detected by the keyboard event.
+     * Example: `"W"`, `"ArrowUp"`, `Q`. Multivalue is supported
+     * @type {string[]}
+     */
+    keys;
+
+    /**
+     * The function to execute when this hotkey is triggered.
+     * @type {() => void}
+     */
+    handler;
+
+    /**
+     * Creates a new GameKeyInput definition.
+     *
+     * @param {HotkeyScope} scope - The scope in which the hotkey is active.
+     * @param {string} name - A short, human-readable name for the hotkey.
+     * @param {string} description - A detailed description of what the hotkey does.
+     * @param {string[]} keys - The actual key value as detected by the keyboard event.
+     * @param {() => void} handler - The function to execute when this hotkey is triggered.
+     */
+    constructor(scope, name, description, keys, handler) {
+        this.scope = scope;
+        this.name = name;
+        this.description = description;
+        this.keys = keys;
+        this.handler = handler;
+    }
+}
 
 /**
- * Handles keyboard input based on the current game state.
- * @param {KeyboardEvent} event
+ * Handles registering and processing keyboard hotkeys for the game.
  */
-const handleInput = (event) => {
-    const key = event.key;
-    const mode = gameState.getState();
+class InputHandler {
+    /**
+     * @type {Map<HotkeyScope, GameKeyInput[]>}
+     * Keys are scope names, values are arrays of GameKeyInput objects.
+     */
+    hotkeysByScope = new Map();
 
-    if (globalShortcuts[key]) {
-        globalShortcuts[key]();
-        return;
+    /**
+     * Registers a new hotkey.
+     * @param {...GameKeyInput} args - The hotkey definitions to register.
+     */
+    register = (...args) => {
+        args.forEach(hotkey => {
+            if (!this.hotkeysByScope.has(hotkey.scope)) {
+                this.hotkeysByScope.set(hotkey.scope, []);
+            }
+            this.hotkeysByScope.get(hotkey.scope).push(hotkey);
+        });
     }
 
-    if (mode === "move" && moveControls[key]) {
-        moveControls[key]();
-        return;
-    }
+    /**
+     * Finds and runs the matching hotkey handler for the given key event.
+     * Global scope is checked first.
+     * @param {KeyboardEvent} event
+     */
+    handleKeydown = (event) => {
+        const globalHotkeys = this.hotkeysByScope.get("global") || [];
+        const globalMatch = globalHotkeys.find(h => h.keys.includes(event.key));
 
-    if (mode === "draft" && draftControls[key]) {
-        draftControls[key]();
-        return;
-    }
-};
+        if (globalMatch) {
+            event.preventDefault();
+            globalMatch.handler();
+            return; // skip scope check if global handled it
+        }
 
+        // 2️⃣ Then check the active scope
+        const scopeHotkeys = this.hotkeysByScope.get(gameState.getState()) || [];
+        const scopeMatch = scopeHotkeys.find(h => h.keys.includes(event.key));
+
+        if (scopeMatch) {
+            event.preventDefault();
+            scopeMatch.handler();
+        }
+    }
+}
+
+/** @type {InputHandler} */
+const inputHandler = new InputHandler();
 
 let lastFrameTime = performance.now();
 /**
@@ -2416,17 +2602,178 @@ const gameLoop = (timestamp) => {
         context.fillStyle = CSS_COLOR_NAMES.Pink;
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`FPS: ${Math.round(fps)}`, renderer.layout.draft.x, renderer.layout.draft.y);
+
+
+        const rectSize = getFontSizeInPixels("sm");
+        /** @type {Rectangle} */
+        const rect = {
+            x: renderer.layout.draft.width - 2 * rectSize,
+            y: renderer.layout.draft.y + rectSize,
+            width: rectSize,
+            height: rectSize,
+        };
+        context.fillStyle = renderer.useSprites ? CSS_COLOR_NAMES.Wheat : CSS_COLOR_NAMES.MediumVioletRed;
+        context.fillRect(rect.x, rect.y, rect.width, rect.height);
+        if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+            canvas.style.cursor = 'pointer';
+        }
     }
     requestAnimationFrame(gameLoop);
 }
 
-const run = async () => {
-    document.addEventListener("keydown", handleInput);
+const setup = () => {
+    document.addEventListener("keydown", inputHandler.handleKeydown);
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleClick);
     window.addEventListener("resize", handleResize);
 
-    gameLoop(0);
+    inputHandler.register(
+        {
+            keys: ["h"],
+            name: "Toggle Debug Mode",
+            description: "Toggles Debug Mode on or off",
+            scope: "global",
+            handler: () => {
+                DEBUG_MODE = !DEBUG_MODE;
+            }
+        },
+        {
+            keys: ["t"],
+            name: "Toggle Sprite Mode",
+            description: "Toggles Sprite Mode on or off",
+            scope: "global",
+            handler: () => {
+                renderer.useSprites = !renderer.useSprites;
+            }
+        },
+        {
+            keys: ["g"],
+            name: "Add 5 Gems",
+            description: "Adds 5 gems to the player inventory",
+            scope: "global",
+            handler: () => {
+                gameState.addResource("gems", 5);
+            }
+        },
+        {
+            keys: ["k"],
+            name: "Add 5 Keys",
+            description: "Adds 5 keys to the player inventory",
+            scope: "global",
+            handler: () => {
+                gameState.addResource("keys", 5);
+            }
+        }
+    );
+    inputHandler.register(
+        {
+            keys: ["w", "ArrowUp"],
+            name: "Move North",
+            description: "Move the player north",
+            scope: "move",
+            handler: () => updatePlayerPosition("NORTH"),
+        },
+        {
+            keys: ["e"],
+            name: "Move North-East",
+            description: "Move the player north-east",
+            scope: "move",
+            handler: () => updatePlayerPosition("NORTH_EAST"),
+        },
+        {
+            keys: ["d"],
+            name: "Move South-East",
+            description: "Move the player south-east",
+            scope: "move",
+            handler: () => updatePlayerPosition("SOUTH_EAST"),
+        },
+        {
+            keys: ["s", "ArrowDown"],
+            name: "Move South",
+            description: "Move the player south",
+            scope: "move",
+            handler: () => updatePlayerPosition("SOUTH"),
+        },
+        {
+            keys: ["a"],
+            name: "Move South-West",
+            description: "Move the player south-west",
+            scope: "move",
+            handler: () => updatePlayerPosition("SOUTH_WEST"),
+        },
+        {
+            keys: ["q"],
+            name: "Move North-West",
+            description: "Move the player north-west",
+            scope: "move",
+            handler: () => updatePlayerPosition("NORTH_WEST"),
+        },
+        {
+            keys: ["r"],
+            name: "Restart Game",
+            description: "Start a new game",
+            scope: "move",
+            handler: () => gameState.newGame(),
+        }
+    );
+
+    inputHandler.register(
+        {
+            keys: ["d", "ArrowRight"],
+            name: "Next Draft Option",
+            description: "Move draft selection to the next option",
+            scope: "draft",
+            handler: () => {
+                gameState.draft.index = clamp(
+                    gameState.draft.index + 1,
+                    0,
+                    gameState.draft.options.length - 1
+                );
+            },
+        },
+        {
+            keys: ["a", "ArrowLeft"],
+            name: "Previous Draft Option",
+            description: "Move draft selection to the previous option",
+            scope: "draft",
+            handler: () => {
+                gameState.draft.index = clamp(
+                    gameState.draft.index - 1,
+                    0,
+                    gameState.draft.options.length - 1
+                );
+            },
+        },
+        {
+            keys: [" ", "Enter"],
+            name: "Place Room",
+            description: "Place the selected room",
+            scope: "draft",
+            handler: () => placeRoom(),
+        },
+        {
+            keys: ["r"],
+            name: "Refresh Draft",
+            description: "Refresh draft options by spending 2 gems",
+            scope: "draft",
+            handler: () => {
+                if (gameState.getResource("gems") >= 2) {
+                    gameState.removeResource("gems", 2);
+                    refreshDrafts();
+                }
+            },
+        }
+    );
+
+};
+
+const run = async () => {
+    setup();
+    renderer.spriteSheet = new Image();
+    renderer.spriteSheet.src = "./hextiles.png";
+    renderer.spriteSheet.onload = () => {
+        gameLoop(0);
+    };
 };
 
 run().then(() => console.log("Game started."));
