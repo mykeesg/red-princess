@@ -8,7 +8,7 @@ Portable game. Can run anywhere where there's a browser with `JS` (and `HTML5`) 
 
 ## FAQ
 - ***Why is it a single file in JS?***
-  - Because that's the whole challenge I set to myself. Create the game in JS, on an HTML canvas.
+  - Because that's the whole challenge I set to myself. Create the game in JS, on an HTML canvas. Single file solution as it started small, will do proper modularization later.
 - ***Why are you not using [XYZ] framework instead?***
     - Because I want this to be as portable as possible. Ideally, playing the game should be as easy as opening
       `index.html` in your browser — no need for `npm install`, build steps, or downloading `500MB` of `node_modules`.
