@@ -1577,8 +1577,8 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     if (!hallway.enabled) return;
     const options = {
         "open": {
-            factor: 1,
-            color: CSS_COLOR_NAMES.Lavender,
+            factor: 1.1,
+            color: "#A6835B",
         },
         "blocked": {
             factor: 0.5,
@@ -1586,7 +1586,7 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
         },
         "unknown": {
             factor: 0.75,
-            color: "#e6e6e6",
+            color: "#A6835B",
         }
     }
     const hallwayLength = Math.sqrt(3) * r / 2;
@@ -1594,8 +1594,8 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     context.fillStyle = options[hallway.status].color;
 
 
-    context.lineWidth = getFontSizeInPixels("xs") / 10;
-    context.strokeStyle = "black";
+    context.lineWidth = getFontSizeInPixels("xs") / 2;
+    context.strokeStyle = "#69401E";
 
     const drawRotatedRect = (x, y, width, height, angleRad) => {
         context.save();
@@ -2020,6 +2020,8 @@ const renderHexGrid = (width, height) => {
     const unitWidth = width / 10;
     const r = unitWidth / 2;
 
+    const spacing = 1.1;
+
     for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
             const hexHeight = Math.sqrt(3) * r;
@@ -2028,11 +2030,11 @@ const renderHexGrid = (width, height) => {
             //Shift items in even columns 1 unit down. Center is offset as well.
             const offsetY = ((col % 2) + 1) * rowOffset;
             const cy = (row * hexHeight) + offsetY;
-            renderHexRoom(cx, cy, r, gameState.at(row, col));
+            renderHexRoom(spacing * cx, spacing * cy, r, gameState.at(row, col));
             //renderPuzzle(cx, cy, r);
             if (row === gameState.player.row && col === gameState.player.col) {
                 //player, TODO animation
-                renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
+                renderCircle(spacing * cx, spacing * cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
             }
             if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
                 /**
@@ -2047,13 +2049,13 @@ const renderHexGrid = (width, height) => {
                     context.fillStyle = "white";
                     context.textBaseline = 'middle';
                     context.textAlign = 'center';
-                    context.fillText(coordToString(currentCoord), cx, cy);
+                    context.fillText(coordToString(currentCoord), spacing * cx, spacing * cy);
                 }
 
                 if (gameState.getState() === "move" && gameState.canPlayerDraftTowards(getDirection(gameState.player, currentCoord))) {
                     context.save();
                     context.globalAlpha = selectionAlpha;
-                    renderHexagon(cx, cy, 0.75 * r, {fill: ROOM_COLORS.draft});
+                    renderHexagon(spacing * cx, spacing * cy, 0.75 * r, {fill: ROOM_COLORS.draft});
                     context.restore();
                 }
             }
@@ -2062,7 +2064,7 @@ const renderHexGrid = (width, height) => {
                 context.save();
                 context.fillStyle = ROOM_COLORS.draft;
                 context.globalAlpha = selectionAlpha;
-                renderHexRoom(cx, cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
+                renderHexRoom(spacing * cx, spacing * cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
                 context.restore();
             }
         }
