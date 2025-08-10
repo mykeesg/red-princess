@@ -1498,6 +1498,7 @@ class Renderer {
     maxSpriteCol = 8;
 
     useSprites = false;
+    displayHallways = true;
 
     constructor() {
         this.mousePosition = {x: -1, y: -1};
@@ -1625,10 +1626,12 @@ const renderHexRoom = (cx, cy, r, room, borders = false) => {
                 ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
             });
         }
-        DIRECTION_VALUES.forEach((direction) => {
-            renderHallway(room.hallways[direction], cx, cy, r, direction);
-        });
-        renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+        if (room.coord.row === -1 || renderer.displayHallways) {
+            DIRECTION_VALUES.forEach((direction) => {
+                renderHallway(room.hallways[direction], cx, cy, r, direction);
+            });
+            renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+        }
     } else if (DEBUG_MODE) {
         renderHexagon(cx, cy, r, undefined,
             {
@@ -2644,6 +2647,15 @@ const setup = () => {
             scope: "global",
             handler: () => {
                 renderer.useSprites = !renderer.useSprites;
+            }
+        },
+        {
+            keys: ["u"],
+            name: "Toggle Hallway Mode",
+            description: "Toggles Hallway Mode on or off",
+            scope: "global",
+            handler: () => {
+                renderer.displayHallways = !renderer.displayHallways;
             }
         },
         {
