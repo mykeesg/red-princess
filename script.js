@@ -2104,8 +2104,9 @@ const mouseToGrid = (mouseX, mouseY) => {
  * @param {number} r
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
  * @param {{fill?: string, border?: string, borderWidth?: number}} highlight
+ * @param {"flat"|"pointy"} orientation
  */
-const renderHexagon = (cx, cy, r, colors, highlight = undefined) => {
+const renderHexagon = (cx, cy, r, colors, highlight = undefined, orientation = "flat") => {
     /*
                r
           +----T----+         ^
@@ -2119,10 +2120,11 @@ const renderHexagon = (cx, cy, r, colors, highlight = undefined) => {
        <-------------->
               width
      */
+    const extraRotation = orientation === "flat" ? 0 : 30;
     context.save();
     context.beginPath();
     for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 180 * (60 * i);
+        const angle = Math.PI / 180 * (60 * i + extraRotation);
         const x = cx + r * Math.cos(angle);
         const y = cy + r * Math.sin(angle);
         if (i === 0) context.moveTo(x, y);
