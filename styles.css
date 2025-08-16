@@ -15,6 +15,7 @@ body {
 
 canvas {
     display: block;
+    image-rendering: pixelated;
 }
 
 /* To remove the scrollbars */
