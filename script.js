@@ -78,7 +78,7 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
 
 /**
  * What state the game is in
- * @typedef {"move"|"draft"} GameState
+ * @typedef {"move"|"draft"|"help"} GameState
  */
 /**
  * What can be found in a room
@@ -1479,15 +1479,11 @@ class Renderer {
      * @type {number}
      */
     canvasHeight;
-    /**
-     * @type {number}
-     */
-    gameWidth;
 
     /**
-     * @type {number}
+     * @type {Rectangle}
      */
-    gameHeight;
+    playArea;
 
     /** @type {HTMLImageElement} */
     spriteSheet;
@@ -1572,7 +1568,7 @@ const FontSizeFactors = {
  * On FULL HD (1920x1080), the 'xs' unit is "12 px" wide, which is (width / 16) / 10 === unitWidth / 10.
  * @param {FontSize} size
  */
-const getFontSizeInPixels = (size) => renderer.gameWidth / 160 * FontSizeFactors[size];
+const getFontSizeInPixels = (size) => renderer.playArea.width / 160 * FontSizeFactors[size];
 
 /**
  *
@@ -1761,24 +1757,20 @@ const renderMovement = (width, height) => {
     context.font = `${getFontSizeInPixels("xl")}px monospace`;
     context.fillText("Controls", width / 2, 0);
 
+    const smallFontSize = getFontSizeInPixels("sm");
+    context.textAlign = "left";
+    context.font = `${smallFontSize}px monospace`;
 
-    const cx = unitWidth;
-    const cy = 2.5 * unitHeight;
-    const r = unitWidth * 0.5;
-    renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
-    DIRECTION_VALUES.forEach((direction) => {
-        renderHallway({enabled: true, status: "open"}, cx, cy, r, direction);
+    let idx = 2;
+    inputHandler.hotkeysByScope.forEach((inputs, scope) => {
+        idx += 1;
+        context.fillText(`${scope.substring(0, 1).toUpperCase() + scope.substring(1)} keys:`, 0, idx * smallFontSize);
+        inputs.forEach((input) => {
+            idx += 1;
+            context.fillText(`[${input.keys[0]}] ${input.name}`, smallFontSize, idx * smallFontSize);
+        });
+        idx += 1;
     });
-    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
-    const controls = ["D", "S", "A", "Q", "W", "E"];
-    for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 180 * (60 * i + 30);
-        const x = cx + 1.1 * r * Math.cos(angle);
-        const y = cy + 1.1 * r * Math.sin(angle);
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        drawKeyLabel(controls[i], x, y);
-    }
 };
 
 /**
@@ -2292,7 +2284,10 @@ const render = () => {
         canvas.height = window.innerHeight;
         context.imageSmoothingEnabled = false;
 
-        const {x, y, width, height} = getPlayArea();
+        const playArea = getPlayArea();
+        renderer.playArea = playArea;
+
+        const {x, y, width, height} = playArea;
         const unitWidth = width / 16;
         const unitHeight = height / 9;
 
@@ -2340,8 +2335,6 @@ const render = () => {
         renderer.unitHeight = unitHeight;
         renderer.canvasWidth = canvas.width;
         renderer.canvasHeight = canvas.height;
-        renderer.gameWidth = width;
-        renderer.gameHeight = height;
     }
     context.fillStyle = CLEAR_COLOR;
     context.fillRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
@@ -2479,14 +2472,19 @@ const handleClick = (event) => {
     const rectSize = getFontSizeInPixels("sm");
     /** @type {Rectangle} */
     const rect = {
-        x: renderer.layout.draft.width - 2 * rectSize,
-        y: renderer.layout.draft.y + rectSize,
+        x: renderer.playArea.x + renderer.playArea.width - 2 * rectSize,
+        y: renderer.playArea.y + rectSize,
         width: rectSize,
         height: rectSize,
     };
     if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
         renderer.useSprites = !renderer.useSprites;
     }
+
+    // TODO proper UI elements
+    // rect.x -= 2 * rectSize;
+    // if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+    // }
 
 };
 
@@ -2625,8 +2623,8 @@ const gameLoop = (timestamp) => {
         const rectSize = getFontSizeInPixels("sm");
         /** @type {Rectangle} */
         const rect = {
-            x: renderer.layout.draft.width - 2 * rectSize,
-            y: renderer.layout.draft.y + rectSize,
+            x: renderer.playArea.x + renderer.playArea.width - 2 * rectSize,
+            y: renderer.playArea.y + rectSize,
             width: rectSize,
             height: rectSize,
         };
@@ -2635,6 +2633,13 @@ const gameLoop = (timestamp) => {
         if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
             canvas.style.cursor = 'pointer';
         }
+        // TODO
+        // rect.x -= 2 * rectSize;
+        // context.textBaseline = 'hanging';
+        // context.fillText("❓", rect.x, rect.y);
+        // if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+        //     canvas.style.cursor = 'pointer';
+        // }
     }
     requestAnimationFrame(gameLoop);
 }
