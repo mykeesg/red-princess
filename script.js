@@ -1582,7 +1582,7 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     if (!hallway.enabled) return;
     const options = {
         "open": {
-            factor: 1.1,
+            factor: 1,
             color: "#A6835B",
         },
         "blocked": {
@@ -2021,7 +2021,7 @@ const renderHexGrid = (width, height) => {
     const unitWidth = width / 10;
     const r = unitWidth / 2;
 
-    const spacing = 1.1;
+    const spacing = 1;
 
     for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
