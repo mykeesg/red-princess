@@ -1479,6 +1479,15 @@ class Renderer {
      * @type {number}
      */
     canvasHeight;
+    /**
+     * @type {number}
+     */
+    gameWidth;
+
+    /**
+     * @type {number}
+     */
+    gameHeight;
 
     /** @type {HTMLImageElement} */
     spriteSheet;
@@ -1563,7 +1572,7 @@ const FontSizeFactors = {
  * On FULL HD (1920x1080), the 'xs' unit is "12 px" wide, which is (width / 16) / 10 === unitWidth / 10.
  * @param {FontSize} size
  */
-const getFontSizeInPixels = (size) => canvas.width / 160 * FontSizeFactors[size];
+const getFontSizeInPixels = (size) => renderer.gameWidth / 160 * FontSizeFactors[size];
 
 /**
  *
@@ -1749,8 +1758,8 @@ const renderMovement = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
-    context.font = `${getFontSizeInPixels("xl")}px Consolas`;
-    context.fillText("Movement", width / 2, unitHeight);
+    context.font = `${getFontSizeInPixels("xl")}px monospace`;
+    context.fillText("Controls", width / 2, 0);
 
 
     const cx = unitWidth;
@@ -2331,6 +2340,8 @@ const render = () => {
         renderer.unitHeight = unitHeight;
         renderer.canvasWidth = canvas.width;
         renderer.canvasHeight = canvas.height;
+        renderer.gameWidth = width;
+        renderer.gameHeight = height;
     }
     context.fillStyle = CLEAR_COLOR;
     context.fillRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
