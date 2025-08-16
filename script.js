@@ -2,12 +2,20 @@
 // noinspection UnnecessaryLocalVariableJS, UnnecessaryReturnStatementJS
 
 let DEBUG_MODE = false;
+let RENDER_AREA_HAS_BEEN_RESIZED = true;
 
 /**
  * A coordinate on the grid, identified by its row and column.
  * @typedef {Object} Coord
  * @property {number} row - The row index within the grid.
  * @property {number} col - The column index within the grid.
+ */
+
+/**
+ * A Point on the canvas, identified by its x and y position.
+ * @typedef {Object} Point2D
+ * @property {number} x - The x coordinate (horizontal).
+ * @property {number} y - The y coordinate (vertical).
  */
 
 /**
@@ -70,7 +78,7 @@ let DEBUG_MODE = false;
 
 /**
  * What state the game is in
- * @typedef {"move"|"draft"} GameState
+ * @typedef {"move"|"draft"|"help"} GameState
  */
 /**
  * What can be found in a room
@@ -90,11 +98,13 @@ let DEBUG_MODE = false;
  */
 
 /**
+ * Represents primary visual symbols used to identify the main room effect
  * @typedef {"spiral" | "diamond" | "loop" | "bright" | "circle" | "square"} Symbol
  */
 
 
 /**
+ * Represents alternate symbols that may appear in rooms
  * @typedef {"target" | "star" | "slash" | "paint" | "egg" | "grid"} AltSymbol
  */
 
@@ -162,6 +172,37 @@ const AltSymbolTexts = {
  */
 const isInside = (x, y, rect) =>
     rect.x <= x && rect.y <= y && x <= rect.x + rect.width && y <= rect.y + rect.height;
+
+/**
+ *
+ * @param {Coord} coord
+ * @return {string} the string representation of the given coordinate
+ */
+const coordToString = (coord) => `[${coord.row};${coord.col}]`;
+
+/**
+ *
+ * @param {Coord} coord1
+ * @param {Coord} coord2
+ * @return {boolean} if the two coords are the same, false otherwise
+ */
+const areEqualCoords = (coord1, coord2) => coord1.row === coord2.row && coord1.col === coord2.col;
+
+/**
+ *
+ * @param {Coord} coord1
+ * @param {Coord} coord2
+ * @return {boolean} if the two coords are neighbors on the grid, false otherwise
+ */
+const areNeighbors = (coord1, coord2) => DIRECTION_VALUES.some((direction) => areEqualCoords(tileTowards(coord1, direction), coord2));
+
+/**
+ *
+ * @param origin the origin to check the direction from
+ * @param coord the coord to check towards to
+ * @return {Direction | undefined} if they are neighbors, the proper direction, undefined otherwise
+ */
+const getDirection = (origin, coord) => DIRECTION_VALUES.find((direction) => areEqualCoords(tileTowards(origin, direction), coord))
 
 class SeededRNG {
     /**
@@ -369,7 +410,6 @@ class Tween {
         const eased = this.ease(t);
         const value = this.from + (this.to - this.from) * eased;
 
-        // console.log(`Updating with value ${value} of type ${this.type}`);
         this.onUpdate(value);
 
         if (t === 1) {
@@ -424,8 +464,10 @@ class Room {
     needsKey;
     /** @type {Item[]} */
     items;
+    /** @type {Coord} */
+    coord;
 
-    /** @param {{events: Record<RoomEvent, string>, hallways: Record<Direction, Hallway>, revealed: boolean, triggerCount: number, needsKey: boolean, items: Item[]} | undefined} values */
+    /** @param {Room | undefined} values */
     constructor(values = undefined) {
         if (!!values) {
             this.events = values.events;
@@ -434,6 +476,7 @@ class Room {
             this.triggerCount = values.triggerCount;
             this.needsKey = values.needsKey;
             this.items = values.items;
+            this.coord = values.coord;
         } else {
             this.#defaults();
         }
@@ -457,6 +500,7 @@ class Room {
         this.triggerCount = 0;
         this.needsKey = false;
         this.items = [];
+        this.coord = {row: -1, col: -1};
 
     }
 
@@ -785,18 +829,6 @@ class Game {
     #draft;
 
     /**
-     * Mouse X position relative to the canvas.
-     * @type {number}
-     */
-    mouseX;
-
-    /**
-     * Mouse Y position relative to the canvas.
-     * @type {number}
-     */
-    mouseY;
-
-    /**
      * Grid row index beneath the mouse pointer.
      * @type {number}
      */
@@ -817,8 +849,14 @@ class Game {
         this.#cols = 13;
 
         this.#grid = Array.from({length: this.#rows},
-            () => Array.from({length: this.#cols},
-                () => (new Room()))
+            (_, row) => Array.from({length: this.#cols},
+                (_, col) => {
+                    /** @type {Room}*/
+                    const room = new Room();
+                    room.coord.row = row;
+                    room.coord.col = col;
+                    return room;
+                })
         );
 
         this.#player = {row: 2, col: 0};
@@ -873,8 +911,6 @@ class Game {
             "gems": 0,
         };
 
-        this.mouseX = -1;
-        this.mouseY = -1;
         this.mouseGridRow = -1;
         this.mouseGridCol = -1;
 
@@ -893,10 +929,18 @@ class Game {
         return this.#cols;
     }
 
+    /**
+     *
+     * @return {Coord}
+     */
     get player() {
         return this.#player;
     }
 
+    /**
+     *
+     * @return {Coord}
+     */
     get exit() {
         return this.#exit;
     }
@@ -948,13 +992,11 @@ class Game {
 
     /**
      *
-     * @param {number} row
-     * @param {number} col
      * @param {Room} room
      */
-    placeRoom(row, col, room) {
-        if (this.valid(row, col)) {
-            this.#grid[row][col] = room;
+    placeRoom(room) {
+        if (this.validCoord(room.coord)) {
+            this.#grid[room.coord.row][room.coord.col] = room;
         }
     }
 
@@ -1151,6 +1193,49 @@ class Game {
     set lastEffect(value) {
         this.#lastEffect = value;
     }
+
+    /**
+     *
+     * @return {Room}
+     */
+    get playerRoom() {
+        return this.atCoord(this.#player);
+    }
+
+    /**
+     *
+     * @param {Direction} direction
+     * @return {boolean} true if so, false otherwise
+     */
+    canPlayerDraftTowards(direction) {
+        if (!direction) {
+            return false;
+        }
+        /**
+         *
+         * @type {Coord}
+         */
+        const neighborCoords = tileTowards(this.player, direction);
+        if (!this.validCoord(neighborCoords)) {
+            return false;
+        }
+
+        /**
+         *
+         * @type {Room}
+         */
+        const neighborRoom = this.atCoord(neighborCoords);
+        if (neighborRoom.revealed) {
+            return false;
+        }
+
+        /**
+         *
+         * @type {Room}
+         */
+        const playerRoom = this.playerRoom;
+        return playerRoom.hallways[direction].enabled && playerRoom.hallways[direction].status === "unknown";
+    }
 }
 
 /** @type {Game} */
@@ -1281,7 +1366,8 @@ const generateDraftRoom = (index, direction) => {
     room.hallways[opposite(direction)].enabled = true;
     room.hallways[opposite(direction)].status = "open";
     room.needsKey = purpose !== "extraKey" && randomBool();
-
+    room.coord.row = -1;
+    room.coord.col = index;
 }
 
 const refreshDrafts = () => {
@@ -1289,9 +1375,10 @@ const refreshDrafts = () => {
     gameState.draft.index = 0;
     let canDraft = true;
     do {
-        generateDraftRoom(0, direction);
-        generateDraftRoom(1, direction);
-        generateDraftRoom(2, direction);
+        for (let i = 0; i < gameState.draft.options.length; i++) {
+            HEX_TILE_CACHE.delete(coordToString({row: -1, col: i}));
+            generateDraftRoom(i, direction);
+        }
         canDraft = gameState.getResource("keys") !== 0 || gameState.draft.options.findIndex(room => !room.needsKey) !== -1;
     } while (!canDraft);
 }
@@ -1318,6 +1405,8 @@ const updatePlayerPosition = (direction) => {
             at(newPosition).enter();
             gameState.movePlayerToCoord(newPosition);
             gameState.removeResource("steps");
+            // TODO move it from here
+            renderer.nextSprite();
         }
     }
 }
@@ -1331,7 +1420,9 @@ const placeRoom = () => {
         newRoom.needsKey = false;
         gameState.removeResource("keys");
     }
-    gameState.placeRoom(gameState.draft.position.row, gameState.draft.position.col, newRoom);
+    newRoom.coord.row = gameState.draft.position.row;
+    newRoom.coord.col = gameState.draft.position.col;
+    gameState.placeRoom(newRoom);
     updatePlayerPosition(gameState.draft.direction);
     gameState.draft.index = 0;
     DIRECTION_VALUES.forEach(direction => {
@@ -1359,6 +1450,77 @@ const update = (delta) => {
     // gameState.mouseGridRow = -1;
     // gameState.mouseGridCol = -1;
 };
+
+class Renderer {
+    /** @type {Record<string, Rectangle>} */
+    layout;
+
+    /**
+     * @type {Point2D}
+     */
+    mousePosition;
+
+    /**
+     * @type {number}
+     */
+    unitWidth;
+
+    /**
+     * @type {number}
+     */
+    unitHeight;
+
+    /**
+     * @type {number}
+     */
+    canvasWidth;
+
+    /**
+     * @type {number}
+     */
+    canvasHeight;
+
+    /**
+     * @type {Rectangle}
+     */
+    playArea;
+
+    /** @type {HTMLImageElement} */
+    spriteSheet;
+
+    // 512 x 854
+    // 342 px of "space" above
+    // spriteWidth = 512;
+    // spriteHeight = 854;
+
+    spriteWidth = 32;
+    spriteHeight = 48;
+
+    renderedSpriteRow = 0;
+    renderedSpriteCol = 0;
+
+    maxSpriteRow = 5;
+    maxSpriteCol = 8;
+
+    useSprites = false;
+    displayHallways = true;
+
+    constructor() {
+        this.mousePosition = {x: -1, y: -1};
+    }
+
+    nextSprite() {
+        const spriteCount = this.maxSpriteRow * this.maxSpriteCol;
+        const index = (this.renderedSpriteRow * this.maxSpriteCol + this.renderedSpriteCol + 1) % spriteCount;
+
+        this.renderedSpriteRow = Math.floor(index / this.maxSpriteCol);
+        this.renderedSpriteCol = index % this.maxSpriteCol;
+    }
+
+    isReady() {
+        return !RENDER_AREA_HAS_BEEN_RESIZED;
+    }
+}
 
 /**
  *
@@ -1406,7 +1568,7 @@ const FontSizeFactors = {
  * On FULL HD (1920x1080), the 'xs' unit is "12 px" wide, which is (width / 16) / 10 === unitWidth / 10.
  * @param {FontSize} size
  */
-const getFontSizeInPixels = (size) => canvas.width / 160 * FontSizeFactors[size];
+const getFontSizeInPixels = (size) => renderer.playArea.width / 160 * FontSizeFactors[size];
 
 /**
  *
@@ -1421,7 +1583,7 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     const options = {
         "open": {
             factor: 1,
-            color: CSS_COLOR_NAMES.Lavender,
+            color: "#A6835B",
         },
         "blocked": {
             factor: 0.5,
@@ -1429,7 +1591,7 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
         },
         "unknown": {
             factor: 0.75,
-            color: "#e6e6e6",
+            color: "#A6835B",
         }
     }
     const hallwayLength = Math.sqrt(3) * r / 2;
@@ -1437,8 +1599,8 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     context.fillStyle = options[hallway.status].color;
 
 
-    context.lineWidth = getFontSizeInPixels("xs") / 10;
-    context.strokeStyle = "black";
+    context.lineWidth = getFontSizeInPixels("xs") / 2;
+    context.strokeStyle = "#69401E";
 
     const drawRotatedRect = (x, y, width, height, angleRad) => {
         context.save();
@@ -1461,14 +1623,20 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
  */
 const renderHexRoom = (cx, cy, r, room, borders = false) => {
     if (room.revealed) {
-        renderHexagon(cx, cy, r, {
-            fill: ROOM_COLORS[room.events.enter],
-            ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
-        });
-        DIRECTION_VALUES.forEach((direction) => {
-            renderHallway(room.hallways[direction], cx, cy, r, direction);
-        });
-        renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+        if (renderer.useSprites) {
+            renderHexTileImage(cx, cy, r, room.coord, room.events["enter"]);
+        } else {
+            renderHexagon(cx, cy, r, {
+                fill: ROOM_COLORS[room.events.enter],
+                ...(borders && {border: CSS_COLOR_NAMES.Wheat, borderWidth: 3}),
+            });
+        }
+        if (room.coord.row === -1 || renderer.displayHallways) {
+            DIRECTION_VALUES.forEach((direction) => {
+                renderHallway(room.hallways[direction], cx, cy, r, direction);
+            });
+            renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
+        }
     } else if (DEBUG_MODE) {
         renderHexagon(cx, cy, r, undefined,
             {
@@ -1586,27 +1754,23 @@ const renderMovement = (width, height) => {
     context.textAlign = 'center';
     context.textBaseline = 'top';
     context.fillStyle = "white";
-    context.font = `${getFontSizeInPixels("xl")}px Consolas`;
-    context.fillText("Movement", width / 2, unitHeight);
+    context.font = `${getFontSizeInPixels("xl")}px monospace`;
+    context.fillText("Controls", width / 2, 0);
 
+    const smallFontSize = getFontSizeInPixels("sm");
+    context.textAlign = "left";
+    context.font = `${smallFontSize}px monospace`;
 
-    const cx = unitWidth;
-    const cy = 2.5 * unitHeight;
-    const r = unitWidth * 0.5;
-    renderHexagon(cx, cy, r, {fill: ROOM_COLORS.exit});
-    DIRECTION_VALUES.forEach((direction) => {
-        renderHallway({enabled: true, status: "open"}, cx, cy, r, direction);
+    let idx = 2;
+    inputHandler.hotkeysByScope.forEach((inputs, scope) => {
+        idx += 1;
+        context.fillText(`${scope.substring(0, 1).toUpperCase() + scope.substring(1)} keys:`, 0, idx * smallFontSize);
+        inputs.forEach((input) => {
+            idx += 1;
+            context.fillText(`[${input.keys[0]}] ${input.name}`, smallFontSize, idx * smallFontSize);
+        });
+        idx += 1;
     });
-    renderCircle(cx, cy, r / 5, {fill: CSS_COLOR_NAMES.Lavender, border: "black", borderWidth: 0.5});
-    const controls = ["D", "S", "A", "Q", "W", "E"];
-    for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 180 * (60 * i + 30);
-        const x = cx + 1.1 * r * Math.cos(angle);
-        const y = cy + 1.1 * r * Math.sin(angle);
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        drawKeyLabel(controls[i], x, y);
-    }
 };
 
 /**
@@ -1681,9 +1845,15 @@ const renderPuzzle = (cx, cy, r) => {
     const symbols = Object.values(SymbolTexts);
     const altSymbols = Object.values(AltSymbolTexts);
 
-    const coords = `[${gameState.player.row};${gameState.player.col}]`;
+    const coords = coordToString(gameState.player);
     const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
 
+    if (context !== null) {
+        renderHexTileImage(cx, cy, r, gameState.player, gameState.playerRoom.events["enter"]);
+        return;
+    }
+
+    // temporarily disabled without linter complaints
     renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
 
     context.setLineDash([lineLength, spaceLength]);
@@ -1741,6 +1911,71 @@ const renderPuzzle = (cx, cy, r) => {
     context.fillText(`${randomSymbols.innerSymbol}`, cx, cy);
 };
 
+
+/** @type {Map<string, Coord>} */
+const HEX_TILE_CACHE = new Map();
+
+/** @type {Record<string, Coord[]>} */
+const HEX_TILE_OPTIONS = {
+    "extraSteps": [{row: 3, col: 4}],
+    "extraKey": [{row: 3, col: 6}],
+    "money": [{row: 2, col: 6}],
+    "taxes": [{row: 1, col: 2}],
+    "garden": [{row: 4, col: 7}],
+    "shop": [{row: 1, col: 0}],
+    "start": [{row: 4, col: 7}],
+    "exit": [{row: 2, col: 7}],
+    "noop": [{row: 0, col: 0}],
+};
+
+/**
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @param {Coord} coord
+ * @param {RoomEvent} purpose
+ */
+const renderHexTileImage = (cx, cy, r, coord, purpose) => {
+    const tx = renderer.spriteWidth / 2;
+    const ty = renderer.spriteHeight - tx;
+
+    const targetWidth = 2 * r;
+    const scale = Math.round(targetWidth / renderer.spriteWidth * 100) / 100;
+    const targetHeight = renderer.spriteHeight * scale;
+
+    const dx = cx - tx * scale;
+    const dy = cy - ty * scale;
+
+    let spriteRow;
+    let spriteCol;
+
+    const coordStr = coordToString(coord);
+    if (HEX_TILE_CACHE.has(coordStr)) {
+        /** @type {Coord} */
+        const tile = HEX_TILE_CACHE.get(coordStr);
+        spriteRow = tile.row;
+        spriteCol = tile.col;
+    } else {
+        /** @type {Coord} */
+        const randomTile = randomElement(HEX_TILE_OPTIONS[purpose]);
+        spriteRow = randomTile.row;
+        spriteCol = randomTile.col;
+        HEX_TILE_CACHE.set(coordStr, randomTile);
+    }
+
+    context.drawImage(
+        renderer.spriteSheet,
+        spriteCol * renderer.spriteWidth,
+        spriteRow * renderer.spriteHeight + 1,
+        renderer.spriteWidth,
+        renderer.spriteHeight,
+        dx,
+        dy,
+        targetWidth,
+        targetHeight
+    );
+}
+
 /**
  *
  * @param {number} width
@@ -1784,8 +2019,9 @@ const renderHexGrid = (width, height) => {
     const cols = gameState.cols;
     const rows = gameState.rows;
     const unitWidth = width / 10;
-    const unitHeight = height / 5;
     const r = unitWidth / 2;
+
+    const spacing = 1;
 
     for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
@@ -1795,22 +2031,41 @@ const renderHexGrid = (width, height) => {
             //Shift items in even columns 1 unit down. Center is offset as well.
             const offsetY = ((col % 2) + 1) * rowOffset;
             const cy = (row * hexHeight) + offsetY;
-            renderHexRoom(cx, cy, r, gameState.at(row, col));
+            renderHexRoom(spacing * cx, spacing * cy, r, gameState.at(row, col));
             //renderPuzzle(cx, cy, r);
             if (row === gameState.player.row && col === gameState.player.col) {
                 //player, TODO animation
-                renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
+                renderCircle(spacing * cx, spacing * cy, getFontSizeInPixels("xs"), {fill: PLAYER_COLOR});
             }
             if (gameState.mouseGridRow === row && gameState.mouseGridCol === col) {
-                context.fillText(`[${row};${col}]`, cx, cy);
+                /**
+                 *
+                 * @type {Coord}
+                 */
+                const currentCoord = {
+                    row: row,
+                    col: col
+                };
+                if (DEBUG_MODE) {
+                    context.fillStyle = "white";
+                    context.textBaseline = 'middle';
+                    context.textAlign = 'center';
+                    context.fillText(coordToString(currentCoord), spacing * cx, spacing * cy);
+                }
+
+                if (gameState.getState() === "move" && gameState.canPlayerDraftTowards(getDirection(gameState.player, currentCoord))) {
+                    context.save();
+                    context.globalAlpha = selectionAlpha;
+                    renderHexagon(spacing * cx, spacing * cy, 0.75 * r, {fill: ROOM_COLORS.draft});
+                    context.restore();
+                }
             }
 
             if (gameState.getState() === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
                 context.save();
                 context.fillStyle = ROOM_COLORS.draft;
                 context.globalAlpha = selectionAlpha;
-                //renderHexagon(cx, cy, 0.75*r, {fill: ROOM_COLORS.draft});
-                renderHexRoom(cx, cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
+                renderHexRoom(spacing * cx, spacing * cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
                 context.restore();
             }
         }
@@ -1821,26 +2076,26 @@ let selectionAlpha = 1;
 let refreshRotation = 0;
 
 /**
+ * Converts mouse coordinates to grid coordinates for flat-topped hexes
+ * with even columns shifted down and origin at (r, r).
  * @param {number} mouseX
  * @param {number} mouseY
- * @param {number} r
- * @return {Coord}
+ * @returns {Coord}
  */
-const mouseToGrid = (mouseX, mouseY, r) => {
-    const rows = gameState.rows;
-    const cols = gameState.cols;
-
-    const hexHeight = Math.sqrt(3) * r;
-    const rowOffset = hexHeight / 2;
-
-    const col = Math.floor((mouseX - r) / (1.5 * r));
-    const offsetY = ((col % 2) + 1) * rowOffset;
-    const row = Math.floor((mouseY - offsetY) / hexHeight + 0.5);
-
-    return {
-        row: Math.max(0, Math.min(rows - 1, row)),
-        col: Math.max(0, Math.min(cols - 1, col))
-    };
+const mouseToGrid = (mouseX, mouseY) => {
+    for (let row = 0; row < gameState.rows; row++) {
+        for (let col = 0; col < gameState.cols; col++) {
+            /**
+             *
+             * @type {Coord}
+             */
+            const coord = {row: row, col: col};
+            if (context.isPointInPath(HEX_GRID_PATHS.get(coordToString(coord)), mouseX, mouseY)) {
+                return coord;
+            }
+        }
+    }
+    return {row: -1, col: -1};
 };
 
 
@@ -1850,8 +2105,9 @@ const mouseToGrid = (mouseX, mouseY, r) => {
  * @param {number} r
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
  * @param {{fill?: string, border?: string, borderWidth?: number}} highlight
+ * @param {"flat"|"pointy"} orientation
  */
-const renderHexagon = (cx, cy, r, colors, highlight = undefined) => {
+const renderHexagon = (cx, cy, r, colors, highlight = undefined, orientation = "flat") => {
     /*
                r
           +----T----+         ^
@@ -1865,10 +2121,11 @@ const renderHexagon = (cx, cy, r, colors, highlight = undefined) => {
        <-------------->
               width
      */
+    const extraRotation = orientation === "flat" ? 0 : 30;
     context.save();
     context.beginPath();
     for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 180 * (60 * i);
+        const angle = Math.PI / 180 * (60 * i + extraRotation);
         const x = cx + r * Math.cos(angle);
         const y = cy + r * Math.sin(angle);
         if (i === 0) context.moveTo(x, y);
@@ -1983,7 +2240,6 @@ const renderHints = (width, height) => {
         "Red paths are blocked from the other side. Gray ones are yet unvisited, while whites are already known.",
         "Do not be afraid to explore for additional resources!"
     ];
-    const innerUnitHeight = height / texts.length;
     texts.forEach((text, idx) => {
         context.fillText(text, width / 2, idx * getFontSizeInPixels("lg") + getFontSizeInPixels("xs"));
     });
@@ -2015,58 +2271,76 @@ const getPlayArea = () => {
     }
 };
 
+/**
+ * Precalculated map of paths, used to check mouse position against the hexes.
+ * @type {Map<string, Path2D>}
+ */
+const HEX_GRID_PATHS = new Map();
+
+
 const render = () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    if (RENDER_AREA_HAS_BEEN_RESIZED) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context.imageSmoothingEnabled = false;
+
+        const playArea = getPlayArea();
+        renderer.playArea = playArea;
+
+        const {x, y, width, height} = playArea;
+        const unitWidth = width / 16;
+        const unitHeight = height / 9;
+
+        /** @type {Record<string, Rectangle>} */
+        const layout = {
+            /** @type {Rectangle} */
+            draft: {
+                x: x,
+                y: y,
+                width: width,
+                height: unitHeight * 2
+            },
+            /** @type {Rectangle} */
+            grid: {
+                x: x + unitWidth * 3,
+                y: y + unitHeight * 2,
+                width: unitWidth * 10,
+                height: unitHeight * 5
+            },
+            /** @type {Rectangle} */
+            resources: {
+                x: x,
+                y: y + unitHeight * 2,
+                width: unitWidth * 3,
+                height: unitHeight * 5
+            },
+            /** @type {Rectangle} */
+            movement: {
+                x: x + unitWidth * 13,
+                y: y + unitHeight * 2,
+                width: unitWidth * 3,
+                height: unitHeight * 5
+            },
+            /** @type {Rectangle} */
+            footer: {
+                x: x,
+                y: y + unitHeight * 7,
+                width: width,
+                height: unitHeight * 2
+            }
+        };
+
+        renderer.layout = layout;
+        renderer.unitWidth = unitWidth;
+        renderer.unitHeight = unitHeight;
+        renderer.canvasWidth = canvas.width;
+        renderer.canvasHeight = canvas.height;
+    }
     context.fillStyle = CLEAR_COLOR;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
-    const {x, y, width, height} = getPlayArea();
-    // if (width < 1280) {
-    //     return false;
-    // }
-
-    const unitWidth = width / 16;
-    const unitHeight = height / 9;
+    context.fillRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
 
     /** @type {Record<string, Rectangle>} */
-    const layout = {
-        /** @type {Rectangle} */
-        draft: {
-            x: x,
-            y: y,
-            width: width,
-            height: unitHeight * 2
-        },
-        /** @type {Rectangle} */
-        grid: {
-            x: x + unitWidth * 3,
-            y: y + unitHeight * 2,
-            width: unitWidth * 10,
-            height: unitHeight * 5
-        },
-        /** @type {Rectangle} */
-        resources: {
-            x: x,
-            y: y + unitHeight * 2,
-            width: unitWidth * 3,
-            height: unitHeight * 5
-        },
-        /** @type {Rectangle} */
-        movement: {
-            x: x + unitWidth * 13,
-            y: y + unitHeight * 2,
-            width: unitWidth * 3,
-            height: unitHeight * 5
-        },
-        /** @type {Rectangle} */
-        footer: {
-            x: x,
-            y: y + unitHeight * 7,
-            width: width,
-            height: unitHeight * 2
-        }
-    };
+    const layout = renderer.layout;
 
     const rows = gameState.rows;
     const cols = gameState.cols;
@@ -2104,16 +2378,70 @@ const render = () => {
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
         context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
     }
+    if (RENDER_AREA_HAS_BEEN_RESIZED) {
+        HEX_GRID_PATHS.clear();
+        const r = renderer.unitWidth / 2;
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const hexHeight = Math.sqrt(3) * r;
+                const rowOffset = hexHeight / 2;
+                const cx = (1.5 * col + 1) * r;
+                //Shift items in even columns 1 unit down. Center is offset as well.
+                const offsetY = ((col % 2) + 1) * rowOffset;
+                const cy = (row * hexHeight) + offsetY;
+
+                const path = new Path2D();
+                for (let i = 0; i < 6; i++) {
+                    const angle = Math.PI / 180 * (60 * i);
+                    const x = cx + r * Math.cos(angle);
+                    const y = cy + r * Math.sin(angle);
+                    if (i === 0) path.moveTo(x, y);
+                    else path.lineTo(x, y);
+                }
+                path.closePath();
+                HEX_GRID_PATHS.set(coordToString({row: row, col: col}), path);
+            }
+        }
+    }
+    RENDER_AREA_HAS_BEEN_RESIZED = false;
     return true;
 };
 
 /**
  *
+ * @type {Renderer}
+ */
+const renderer = new Renderer();
+
+/**
+ *
  * @param {MouseEvent} event
  */
-const handleMove = (event) => {
-    gameState.mouseX = event.offsetX;
-    gameState.mouseY = event.offsetY;
+const handleMouseMove = (event) => {
+    if (!renderer.isReady()) {
+        return;
+    }
+    renderer.mousePosition = {x: event.offsetX, y: event.offsetY};
+    const x = event.offsetX - renderer.layout.grid.x;
+    const y = event.offsetY - renderer.layout.grid.y;
+    const mouseCoord = mouseToGrid(x, y);
+    gameState.mouseGridRow = mouseCoord.row;
+    gameState.mouseGridCol = mouseCoord.col;
+    if (gameState.getState() === "move" && gameState.validCoord(mouseCoord)) {
+        if (gameState.canPlayerDraftTowards(getDirection(gameState.player, mouseCoord))) {
+            canvas.style.cursor = "pointer";
+        } else if (areNeighbors(gameState.player, mouseCoord) && gameState.atCoord(mouseCoord).revealed) {
+            canvas.style.cursor = "pointer";
+        } else {
+            canvas.style.cursor = "default";
+        }
+    } else {
+        canvas.style.cursor = "default";
+    }
+};
+
+const handleResize = () => {
+    RENDER_AREA_HAS_BEEN_RESIZED = true;
 };
 
 /**
@@ -2121,78 +2449,151 @@ const handleMove = (event) => {
  * @param {MouseEvent} event
  */
 const handleClick = (event) => {
+    if (!renderer.isReady()) {
+        return;
+    }
     if (gameState.getState() === "move") {
-        if (gameState.valid(gameState.mouseGridRow, gameState.mouseGridCol)) {
-            console.log(`Move [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
-        } else {
-            console.log(`Cannot move to [${gameState.mouseGridRow};${gameState.mouseGridCol}]`);
+        /**
+         * @type {Coord}
+         */
+        const mouseCoord = {row: gameState.mouseGridRow, col: gameState.mouseGridCol};
+        if (gameState.validCoord(mouseCoord)) {
+            DIRECTION_VALUES.some((direction) => {
+                const neighborPos = tileTowards(gameState.player, direction);
+                if (areEqualCoords(neighborPos, mouseCoord)) {
+                    updatePlayerPosition(direction);
+                    return true;
+                }
+                return false;
+            });
         }
     }
-};
 
-/** @type {Object<string, Function>} */
-const globalShortcuts = {
-    r: () => gameState.newGame(),
-    h: () => {
-        (DEBUG_MODE = !DEBUG_MODE);
-        canvas.style.cursor = DEBUG_MODE ? "pointer" : "default";
-    },
-    g: () => gameState.addResource("gems", 5),
-    k: () => gameState.addResource("keys", 5)
-};
-
-/** @type {Record<string, Function>} */
-const moveControls = {
-    w: () => updatePlayerPosition("NORTH"),
-    ArrowUp: () => updatePlayerPosition("NORTH"),
-    e: () => updatePlayerPosition("NORTH_EAST"),
-    d: () => updatePlayerPosition("SOUTH_EAST"),
-    s: () => updatePlayerPosition("SOUTH"),
-    ArrowDown: () => updatePlayerPosition("SOUTH"),
-    a: () => updatePlayerPosition("SOUTH_WEST"),
-    q: () => updatePlayerPosition("NORTH_WEST")
-};
-
-/** @type {Record<string, Function>} */
-const draftControls = {
-    d: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
-    ArrowRight: () => gameState.draft.index = clamp(gameState.draft.index + 1, 0, gameState.draft.options.length - 1),
-    a: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
-    ArrowLeft: () => gameState.draft.index = clamp(gameState.draft.index - 1, 0, gameState.draft.options.length - 1),
-    " ": () => placeRoom(),
-    Enter: () => placeRoom(),
-    r: () => {
-        if (gameState.getResource("gems") >= 2) {
-            gameState.removeResource("gems", 2);
-            refreshDrafts();
-        }
+    const rectSize = getFontSizeInPixels("sm");
+    /** @type {Rectangle} */
+    const rect = {
+        x: renderer.playArea.x + renderer.playArea.width - 2 * rectSize,
+        y: renderer.playArea.y + rectSize,
+        width: rectSize,
+        height: rectSize,
+    };
+    if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+        renderer.useSprites = !renderer.useSprites;
     }
+
+    // TODO proper UI elements
+    // rect.x -= 2 * rectSize;
+    // if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+    // }
+
 };
+
+/** @typedef {GameState | "global"} HotkeyScope */
+/**
+ * Represents the active state of a keyboard hotkey and its behavior in the game.
+ */
+class GameKeyInput {
+    /**
+     * The scope in which the hotkey is active.
+     * Examples: `"global"`, `"movement"`, `"drafting"`.
+     * @type {HotkeyScope}
+     */
+    scope;
+
+    /**
+     * A short, human-readable name for the hotkey.
+     * @type {string}
+     */
+    name;
+
+    /**
+     * A detailed description of what the hotkey does.
+     * @type {string}
+     */
+    description;
+
+    /**
+     * The actual key value as detected by the keyboard event.
+     * Example: `"W"`, `"ArrowUp"`, `Q`. Multivalue is supported
+     * @type {string[]}
+     */
+    keys;
+
+    /**
+     * The function to execute when this hotkey is triggered.
+     * @type {() => void}
+     */
+    handler;
+
+    /**
+     * Creates a new GameKeyInput definition.
+     *
+     * @param {HotkeyScope} scope - The scope in which the hotkey is active.
+     * @param {string} name - A short, human-readable name for the hotkey.
+     * @param {string} description - A detailed description of what the hotkey does.
+     * @param {string[]} keys - The actual key value as detected by the keyboard event.
+     * @param {() => void} handler - The function to execute when this hotkey is triggered.
+     */
+    constructor(scope, name, description, keys, handler) {
+        this.scope = scope;
+        this.name = name;
+        this.description = description;
+        this.keys = keys;
+        this.handler = handler;
+    }
+}
 
 /**
- * Handles keyboard input based on the current game state.
- * @param {KeyboardEvent} event
+ * Handles registering and processing keyboard hotkeys for the game.
  */
-const handleInput = (event) => {
-    const key = event.key;
-    const mode = gameState.getState();
+class InputHandler {
+    /**
+     * @type {Map<HotkeyScope, GameKeyInput[]>}
+     * Keys are scope names, values are arrays of GameKeyInput objects.
+     */
+    hotkeysByScope = new Map();
 
-    if (globalShortcuts[key]) {
-        globalShortcuts[key]();
-        return;
+    /**
+     * Registers a new hotkey.
+     * @param {...GameKeyInput} args - The hotkey definitions to register.
+     */
+    register = (...args) => {
+        args.forEach(hotkey => {
+            if (!this.hotkeysByScope.has(hotkey.scope)) {
+                this.hotkeysByScope.set(hotkey.scope, []);
+            }
+            this.hotkeysByScope.get(hotkey.scope).push(hotkey);
+        });
     }
 
-    if (mode === "move" && moveControls[key]) {
-        moveControls[key]();
-        return;
-    }
+    /**
+     * Finds and runs the matching hotkey handler for the given key event.
+     * Global scope is checked first.
+     * @param {KeyboardEvent} event
+     */
+    handleKeydown = (event) => {
+        const globalHotkeys = this.hotkeysByScope.get("global") || [];
+        const globalMatch = globalHotkeys.find(h => h.keys.includes(event.key));
 
-    if (mode === "draft" && draftControls[key]) {
-        draftControls[key]();
-        return;
-    }
-};
+        if (globalMatch) {
+            event.preventDefault();
+            globalMatch.handler();
+            return; // skip scope check if global handled it
+        }
 
+        // 2️⃣ Then check the active scope
+        const scopeHotkeys = this.hotkeysByScope.get(gameState.getState()) || [];
+        const scopeMatch = scopeHotkeys.find(h => h.keys.includes(event.key));
+
+        if (scopeMatch) {
+            event.preventDefault();
+            scopeMatch.handler();
+        }
+    }
+}
+
+/** @type {InputHandler} */
+const inputHandler = new InputHandler();
 
 let lastFrameTime = performance.now();
 /**
@@ -2213,20 +2614,198 @@ const gameLoop = (timestamp) => {
         context.fillText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2);
     } else {
         context.textAlign = 'left';
-        context.textBaseline = 'middle';
+        context.textBaseline = 'top';
         context.fillStyle = CSS_COLOR_NAMES.Pink;
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.fillText(`FPS: ${Math.round(fps)}`, 50, 50);
+        context.fillText(`FPS: ${Math.round(fps)}`, renderer.layout.draft.x, renderer.layout.draft.y);
+
+
+        const rectSize = getFontSizeInPixels("sm");
+        /** @type {Rectangle} */
+        const rect = {
+            x: renderer.playArea.x + renderer.playArea.width - 2 * rectSize,
+            y: renderer.playArea.y + rectSize,
+            width: rectSize,
+            height: rectSize,
+        };
+        context.fillStyle = renderer.useSprites ? CSS_COLOR_NAMES.Wheat : CSS_COLOR_NAMES.MediumVioletRed;
+        context.fillRect(rect.x, rect.y, rect.width, rect.height);
+        if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+            canvas.style.cursor = 'pointer';
+        }
+        // TODO
+        // rect.x -= 2 * rectSize;
+        // context.textBaseline = 'hanging';
+        // context.fillText("❓", rect.x, rect.y);
+        // if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
+        //     canvas.style.cursor = 'pointer';
+        // }
     }
     requestAnimationFrame(gameLoop);
 }
 
-const run = async () => {
-    document.addEventListener("keydown", handleInput);
-    //document.addEventListener("mousemove", handleMove);
-    //document.addEventListener("mousedown", handleClick);
+const setup = () => {
+    document.addEventListener("keydown", inputHandler.handleKeydown);
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleClick);
+    window.addEventListener("resize", handleResize);
 
-    gameLoop(0);
+    inputHandler.register(
+        {
+            keys: ["h"],
+            name: "Toggle Debug Mode",
+            description: "Toggles Debug Mode on or off",
+            scope: "global",
+            handler: () => {
+                DEBUG_MODE = !DEBUG_MODE;
+            }
+        },
+        {
+            keys: ["t"],
+            name: "Toggle Sprite Mode",
+            description: "Toggles Sprite Mode on or off",
+            scope: "global",
+            handler: () => {
+                renderer.useSprites = !renderer.useSprites;
+            }
+        },
+        {
+            keys: ["u"],
+            name: "Toggle Hallway Mode",
+            description: "Toggles Hallway Mode on or off",
+            scope: "global",
+            handler: () => {
+                renderer.displayHallways = !renderer.displayHallways;
+            }
+        },
+        {
+            keys: ["g"],
+            name: "Add 5 Gems",
+            description: "Adds 5 gems to the player inventory",
+            scope: "global",
+            handler: () => {
+                gameState.addResource("gems", 5);
+            }
+        },
+        {
+            keys: ["k"],
+            name: "Add 5 Keys",
+            description: "Adds 5 keys to the player inventory",
+            scope: "global",
+            handler: () => {
+                gameState.addResource("keys", 5);
+            }
+        }
+    );
+    inputHandler.register(
+        {
+            keys: ["w", "ArrowUp"],
+            name: "Move North",
+            description: "Move the player north",
+            scope: "move",
+            handler: () => updatePlayerPosition("NORTH"),
+        },
+        {
+            keys: ["e"],
+            name: "Move North-East",
+            description: "Move the player north-east",
+            scope: "move",
+            handler: () => updatePlayerPosition("NORTH_EAST"),
+        },
+        {
+            keys: ["d"],
+            name: "Move South-East",
+            description: "Move the player south-east",
+            scope: "move",
+            handler: () => updatePlayerPosition("SOUTH_EAST"),
+        },
+        {
+            keys: ["s", "ArrowDown"],
+            name: "Move South",
+            description: "Move the player south",
+            scope: "move",
+            handler: () => updatePlayerPosition("SOUTH"),
+        },
+        {
+            keys: ["a"],
+            name: "Move South-West",
+            description: "Move the player south-west",
+            scope: "move",
+            handler: () => updatePlayerPosition("SOUTH_WEST"),
+        },
+        {
+            keys: ["q"],
+            name: "Move North-West",
+            description: "Move the player north-west",
+            scope: "move",
+            handler: () => updatePlayerPosition("NORTH_WEST"),
+        },
+        {
+            keys: ["r"],
+            name: "Restart Game",
+            description: "Start a new game",
+            scope: "move",
+            handler: () => gameState.newGame(),
+        }
+    );
+
+    inputHandler.register(
+        {
+            keys: ["d", "ArrowRight"],
+            name: "Next Draft Option",
+            description: "Move draft selection to the next option",
+            scope: "draft",
+            handler: () => {
+                gameState.draft.index = clamp(
+                    gameState.draft.index + 1,
+                    0,
+                    gameState.draft.options.length - 1
+                );
+            },
+        },
+        {
+            keys: ["a", "ArrowLeft"],
+            name: "Previous Draft Option",
+            description: "Move draft selection to the previous option",
+            scope: "draft",
+            handler: () => {
+                gameState.draft.index = clamp(
+                    gameState.draft.index - 1,
+                    0,
+                    gameState.draft.options.length - 1
+                );
+            },
+        },
+        {
+            keys: [" ", "Enter"],
+            name: "Place Room",
+            description: "Place the selected room",
+            scope: "draft",
+            handler: () => placeRoom(),
+        },
+        {
+            keys: ["r"],
+            name: "Refresh Draft",
+            description: "Refresh draft options by spending 2 gems",
+            scope: "draft",
+            handler: () => {
+                if (gameState.getResource("gems") >= 2) {
+                    gameState.removeResource("gems", 2);
+                    refreshDrafts();
+                }
+            },
+        }
+    );
+
+};
+
+const run = async () => {
+    setup();
+    renderer.spriteSheet = new Image();
+    renderer.spriteSheet.src = "./hextiles.png";
+    renderer.spriteSheet.onload = () => {
+        gameLoop(0);
+    };
 };
 
 run().then(() => console.log("Game started."));
