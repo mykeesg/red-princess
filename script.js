@@ -12,6 +12,13 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
  */
 
 /**
+ * Represents a two-dimensional size measurement.
+ * @typedef {Object} Dimension
+ * @property {number} width - The horizontal size in units (e.g., pixels, tiles).
+ * @property {number} height - The vertical size in units (e.g., pixels, tiles).
+ */
+
+/**
  * A Point on the canvas, identified by its x and y position.
  * @typedef {Object} Point2D
  * @property {number} x - The x coordinate (horizontal).
@@ -121,6 +128,25 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
  * @property {string} fillColor - The main color of the hexagon
  * @property {"straight" | "wavy" | "dotted" | "dashed"} lineType - The line type coming from the center
  */
+
+/**
+ * @typedef {"left" | "center" | "right"} HorizontalAlignment
+ * Represents horizontal text alignment.
+ *
+ * - `"left"`   – text starts at the given x-coordinate
+ * - `"center"` – text is centered on the x-coordinate
+ * - `"right"`  – text ends at the given x-coordinate
+ */
+
+/**
+ * @typedef {"top" | "middle" | "bottom"} VerticalAlignment
+ * Represents vertical text alignment.
+ *
+ * - `"top"`    – text is drawn from the top baseline
+ * - `"middle"` – text is vertically centered on the y-coordinate
+ * - `"bottom"` – text is drawn from the bottom baseline
+ */
+
 
 /** @type {Direction[]} */
 const DIRECTION_VALUES = [
@@ -1520,6 +1546,24 @@ class Renderer {
     isReady() {
         return !RENDER_AREA_HAS_BEEN_RESIZED;
     }
+
+    /**
+     * Draws text with specific alignment.
+     * @param {string} text
+     * @param {number} x
+     * @param {number} y
+     * @param {HorizontalAlignment} hAlign
+     * @param {VerticalAlignment} vAlign
+     * @param {string} color
+     * @param {FontSize} size
+     */
+    drawText(text, x, y, hAlign, vAlign, color, size) {
+        context.textAlign = hAlign;
+        context.textBaseline = vAlign;
+        context.fillStyle = color;
+        context.font = `${getFontSizeInPixels(size)}px monospace`;
+        context.fillText(text, x, y);
+    }
 }
 
 /**
@@ -1722,11 +1766,7 @@ const drawKeyLabel = (label, centerX, centerY) => {
     context.fillRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
     context.strokeRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
 
-    context.textBaseline = "middle";
-    context.textAlign = "center";
-    context.fillStyle = "#333";
-    context.lineWidth = getFontSizeInPixels("xs") / 10;
-    context.fillText(label, centerX, centerY);
+    renderer.drawText(label, centerX, centerY, "center", "middle", "#333", fontSize);
     context.restore();
 }
 
@@ -1748,26 +1788,16 @@ const renderInLayout = (zone, callback) => {
  * @param {number} height
  */
 const renderMovement = (width, height) => {
-    const unitWidth = width / 2;
-    const unitHeight = height / 5;
-
-    context.textAlign = 'center';
-    context.textBaseline = 'top';
-    context.fillStyle = "white";
-    context.font = `${getFontSizeInPixels("xl")}px monospace`;
-    context.fillText("Controls", width / 2, 0);
-
+    renderer.drawText("Controls", width / 2, 0, "center", "top", "white", "xl");
     const smallFontSize = getFontSizeInPixels("sm");
-    context.textAlign = "left";
-    context.font = `${smallFontSize}px monospace`;
 
     let idx = 2;
     inputHandler.hotkeysByScope.forEach((inputs, scope) => {
         idx += 1;
-        context.fillText(`${scope.substring(0, 1).toUpperCase() + scope.substring(1)} keys:`, 0, idx * smallFontSize);
+        renderer.drawText(`${scope.substring(0, 1).toUpperCase() + scope.substring(1)} keys:`, 0, idx * smallFontSize, "left", "top", "white", "sm");
         inputs.forEach((input) => {
             idx += 1;
-            context.fillText(`[${input.keys[0]}] ${input.name}`, smallFontSize, idx * smallFontSize);
+            renderer.drawText(`[${input.keys[0]}] ${input.name}`, smallFontSize, idx * smallFontSize, "left", "top", "white", "sm");
         });
         idx += 1;
     });
@@ -1861,11 +1891,7 @@ const renderPuzzle = (cx, cy, r) => {
         const angle = Math.PI / 180 * (60 * i + 30);
         const x = cx + 0.6 * r * Math.cos(angle);
         const y = cy + 0.6 * r * Math.sin(angle);
-        context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillStyle = "white";
-        context.fillText(`${randomSymbols.outerSymbol}`, x, y);
+        renderer.drawText(`${randomSymbols.outerSymbol}`, x, y, "center", "middle", "white", "sm");
     }
 
     context.setLineDash([]);
@@ -1904,11 +1930,8 @@ const renderPuzzle = (cx, cy, r) => {
     }
     context.setLineDash([]);
     renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: "white"});
-    context.font = `${getFontSizeInPixels("sm")}px monospace`;
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
     //const symbol = symbols[4];
-    context.fillText(`${randomSymbols.innerSymbol}`, cx, cy);
+    renderer.drawText(`${randomSymbols.innerSymbol}`, cx, cy, "center", "middle", "white", "sm");
 };
 
 
@@ -1982,21 +2005,14 @@ const renderHexTileImage = (cx, cy, r, coord, purpose) => {
  * @param {number} height
  */
 const renderResources = (width, height) => {
-    context.textAlign = 'center';
-    context.textBaseline = 'top';
-    context.fillStyle = "white";
-    context.font = `${getFontSizeInPixels("md")}px monospace`;
-    context.fillText(`Resources`, width / 2, 0);
-
-    context.textAlign = 'left';
-    context.font = `${getFontSizeInPixels("sm")}px monospace`;
     const texts = [];
     for (const {type, count} of gameState.getResources()) {
         texts.push(`\u2022 ${ItemTexts[type]} ${type.substring(0, 1).toUpperCase() + type.substring(1)}: ${count}`);
     }
 
+    renderer.drawText(`Resources`, width / 2, 0, "center", "top", "white", "md");
     texts.forEach((text, idx) => {
-        context.fillText(text, width / 2.5, (idx + 1) * getFontSizeInPixels("lg"));
+        renderer.drawText(text, width / 2.5, (idx + 1) * getFontSizeInPixels("lg"), "left", "top", "white", "sm");
     });
 
     const unitWidth = width / 2;
@@ -2047,10 +2063,7 @@ const renderHexGrid = (width, height) => {
                     col: col
                 };
                 if (DEBUG_MODE) {
-                    context.fillStyle = "white";
-                    context.textBaseline = 'middle';
-                    context.textAlign = 'center';
-                    context.fillText(coordToString(currentCoord), spacing * cx, spacing * cy);
+                    renderer.drawText(coordToString(currentCoord), spacing * cx, spacing * cy, "center", "middle", "white", "sm");
                 }
 
                 if (gameState.getState() === "move" && gameState.canPlayerDraftTowards(getDirection(gameState.player, currentCoord))) {
@@ -2178,29 +2191,19 @@ const renderHexDraft = (width, height) => {
         if (idx === gameState.draft.index) {
             if (Effects[draftedRoom.events.enter].description !== "noop") {
                 const textY = (row + 1.25) * unitHeight;
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.fillStyle = "white";
-                context.font = `${getFontSizeInPixels("sm")}px monospace`;
-                context.fillText(Effects[draftedRoom.events.enter].description, cx, textY);
+                renderer.drawText(Effects[draftedRoom.events.enter].description, cx, textY, "center", "middle", "white", "sm");
             }
 
             if (draftedRoom.needsKey) {
                 const iconX = (col - 1.25) * unitWidth;
                 const iconY = unitHeight;
-                context.font = `${getFontSizeInPixels("lg")}px monospace`;
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.fillText(ItemTexts.lock, iconX, iconY);
+                renderer.drawText(ItemTexts.lock, iconX, iconY, "center", "middle", "white", "lg");
             }
 
             if (draftedRoom.items.includes("keys")) {
                 const iconX = (col + 1.25) * unitWidth;
                 const iconY = unitHeight;
-                context.font = `${getFontSizeInPixels("lg")}px monospace`;
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.fillText(ItemTexts.keys, iconX, iconY);
+                renderer.drawText(ItemTexts.keys, iconX, iconY, "center", "middle", "white", "lg");
             }
 
             const closedRoom = draftedRoom.needsKey && gameState.getResource("keys") === 0;
@@ -2215,12 +2218,9 @@ const renderHexDraft = (width, height) => {
         const arrowX = (14.5 * unitWidth);
         const arrowY = unitHeight;
         drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillStyle = "white";
         context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.fillText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight);
-        context.fillText("[R]", 14.5 * unitWidth, 2 * unitHeight);
+        renderer.drawText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight, "center", "middle", "white", "sm");
+        renderer.drawText("[R]", 14.5 * unitWidth, 1.75 * unitHeight, "center", "middle", "white", "sm");
     }
 }
 /**
@@ -2229,10 +2229,6 @@ const renderHexDraft = (width, height) => {
  * @param {number} height
  */
 const renderHints = (width, height) => {
-    context.textAlign = 'center';
-    context.textBaseline = 'top';
-    context.fillStyle = "white";
-    context.font = `${getFontSizeInPixels("sm")}px monospace`;
     const texts = [
         "Draft rooms by selecting an option and press [Space] or [Enter].",
         "Some rooms are locked behind a key, so look out for them to help on your journey!",
@@ -2241,7 +2237,7 @@ const renderHints = (width, height) => {
         "Do not be afraid to explore for additional resources!"
     ];
     texts.forEach((text, idx) => {
-        context.fillText(text, width / 2, idx * getFontSizeInPixels("lg") + getFontSizeInPixels("xs"));
+        renderer.drawText(text, width / 2, idx * getFontSizeInPixels("lg") + getFontSizeInPixels("xs"), "center", "top", "white", "sm");
     });
 };
 
@@ -2363,20 +2359,12 @@ const render = () => {
 
         for (const [name, rect] of Object.entries(layout)) {
             context.strokeRect(rect.x, rect.y, rect.width, rect.height);
-            context.textAlign = 'left';
-            context.textBaseline = 'top';
-            context.fillStyle = CSS_COLOR_NAMES.Pink;
-            context.font = `${getFontSizeInPixels("sm")}px monospace`;
-            context.fillText(`[${name}]`, rect.x + 5, rect.y + 5);
+            renderer.drawText(`[${name}]`, rect.x + 5, rect.y + 5, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
         }
     }
 
     if (gameState.lastEffect !== "noop") {
-        context.textAlign = 'right';
-        context.textBaseline = 'middle';
-        context.fillStyle = "white";
-        context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.fillText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2);
+        renderer.drawText(`${gameState.lastEffect}`, offsetX + cols * tileSize - tileSize / 2, offsetY - tileSize / 2, "right", "middle", "white", "sm");
     }
     if (RENDER_AREA_HAS_BEEN_RESIZED) {
         HEX_GRID_PATHS.clear();
@@ -2607,17 +2595,9 @@ const gameLoop = (timestamp) => {
     gameState.lastTimeStamp = timestamp;
     update(timestamp);
     if (!render()) {
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillStyle = CSS_COLOR_NAMES.Red;
-        context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.fillText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2);
+        renderer.drawText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2, "center", "middle", CSS_COLOR_NAMES.Red, "sm");
     } else {
-        context.textAlign = 'left';
-        context.textBaseline = 'top';
-        context.fillStyle = CSS_COLOR_NAMES.Pink;
-        context.font = `${getFontSizeInPixels("sm")}px monospace`;
-        context.fillText(`FPS: ${Math.round(fps)}`, renderer.layout.draft.x, renderer.layout.draft.y);
+        renderer.drawText(`FPS: ${Math.round(fps)}`, renderer.layout.draft.x, renderer.layout.draft.y, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
 
 
         const rectSize = getFontSizeInPixels("sm");
@@ -2636,7 +2616,7 @@ const gameLoop = (timestamp) => {
         // TODO
         // rect.x -= 2 * rectSize;
         // context.textBaseline = 'hanging';
-        // context.fillText("❓", rect.x, rect.y);
+        // renderer.drawText("❓", rect.x, rect.y, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
         // if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
         //     canvas.style.cursor = 'pointer';
         // }
