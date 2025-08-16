@@ -73,7 +73,7 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
 /**
  * Represents the current state of the mouse.
  * @typedef {Object} MouseState
- * @property {number} x - The current mouse X position (relative to canvas).
+ * @property {number} x - The current mouse X position (relative to renderer.canvas).
  * @property {number} y - The current mouse Y position.
  * @property {Set<number>} buttons - A set of pressed mouse button codes (0 = left, 1 = middle, 2 = right).
  */
@@ -121,7 +121,7 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
  */
 
 /**
- * Rectangle drawn on the canvas.
+ * Rectangle drawn on the renderer.canvas.
  * @typedef {Object} PuzzlePiece
  * @property {Symbol} innerSymbol - The symbol in the middle of the puzzle
  * @property {AltSymbol} outerSymbol - The symbol being run around the inner sections
@@ -580,15 +580,6 @@ class Room {
  * @property {Room[]} options - Array of room options available in the draft.
  */
 
-
-/** @type {HTMLCanvasElement} */
-// @ts-ignore
-const canvas = document.querySelector("#canvas");
-
-/** @type {CanvasRenderingContext2D} */
-// @ts-ignore
-const context = canvas.getContext("2d");
-
 // CSS Color Names
 // The full list can be found here: https://www.w3schools.com/cssref/css_colors.asp
 
@@ -750,13 +741,13 @@ const randomColor = () => randomElement(Object.values(CSS_COLOR_NAMES));
  */
 const useColors = (colors) => {
     if (colors.fill) {
-        context.fillStyle = colors.fill;
-        context.fill();
+        renderer.context.fillStyle = colors.fill;
+        renderer.context.fill();
     }
     if (colors.border) {
-        context.strokeStyle = colors.border;
-        context.lineWidth = colors.borderWidth ?? getFontSizeInPixels("xs") / 10;
-        context.stroke();
+        renderer.context.strokeStyle = colors.border;
+        renderer.context.lineWidth = colors.borderWidth ?? getFontSizeInPixels("xs") / 10;
+        renderer.context.stroke();
     }
 }
 
@@ -1487,24 +1478,9 @@ class Renderer {
     mousePosition;
 
     /**
-     * @type {number}
+     * @type {Dimension}
      */
-    unitWidth;
-
-    /**
-     * @type {number}
-     */
-    unitHeight;
-
-    /**
-     * @type {number}
-     */
-    canvasWidth;
-
-    /**
-     * @type {number}
-     */
-    canvasHeight;
+    unitDimensions;
 
     /**
      * @type {Rectangle}
@@ -1519,8 +1495,8 @@ class Renderer {
     // spriteWidth = 512;
     // spriteHeight = 854;
 
-    spriteWidth = 32;
-    spriteHeight = 48;
+    /** @type {Dimension} */
+    spriteDimensions = {width: 32, height: 48};
 
     renderedSpriteRow = 0;
     renderedSpriteCol = 0;
@@ -1531,7 +1507,23 @@ class Renderer {
     useSprites = false;
     displayHallways = true;
 
+
+    /** @type {HTMLCanvasElement} */
+    canvas;
+    /** @type {CanvasRenderingContext2D} */
+    context;
+
+
     constructor() {
+        /** @type {HTMLCanvasElement | undefined} */
+        const canvas = document.querySelector("#canvas");
+        /** @type {CanvasRenderingContext2D | undefined} */
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) {
+            throw new Error("Can't find canvas to render");
+        }
+        this.canvas = canvas;
+        this.context = context;
         this.mousePosition = {x: -1, y: -1};
     }
 
@@ -1558,11 +1550,104 @@ class Renderer {
      * @param {FontSize} size
      */
     drawText(text, x, y, hAlign, vAlign, color, size) {
-        context.textAlign = hAlign;
-        context.textBaseline = vAlign;
-        context.fillStyle = color;
-        context.font = `${getFontSizeInPixels(size)}px monospace`;
-        context.fillText(text, x, y);
+        renderer.context.textAlign = hAlign;
+        renderer.context.textBaseline = vAlign;
+        renderer.context.fillStyle = color;
+        renderer.context.font = `${getFontSizeInPixels(size)}px monospace`;
+        renderer.context.fillText(text, x, y);
+    }
+
+    recalculatePlayArea() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.context.imageSmoothingEnabled = false;
+        const aspectRatio = 16 / 9;
+        const canvasWidth = this.canvas.width;
+        const canvasHeight = this.canvas.height;
+
+        const canvasAspect = canvasWidth / canvasHeight;
+
+        if (canvasAspect > aspectRatio) {
+            const height = canvasHeight;
+            const width = height * aspectRatio;
+            const x = (canvasWidth - width) / 2;
+            const y = 0;
+            this.playArea = {x, y, width, height};
+        } else {
+            const width = canvasWidth;
+            const height = width / aspectRatio;
+            const x = 0;
+            const y = (canvasHeight - height) / 2;
+            this.playArea = {x, y, width, height};
+        }
+
+        const {x, y, width, height} = this.playArea;
+
+        const unitWidth = width / 16;
+        const unitHeight = height / 9;
+
+        this.unitDimensions = {width: unitWidth, height: unitHeight};
+//       +-----------------------------------------------------------+
+//       |                          DRAFT                            |
+//       |                        (16 x 2)                           |
+//       +-----------------------------------------------------------+
+//       | Resources |                 GRID               | Movement |
+//       |  (3 x 5)  |              (10 x 5)              |  (3 x 5) |
+//       |           |                                    |          |
+//       |           |                                    |          |
+//       |           |                                    |          |
+//       |           |                                    |          |
+//       +-----------------------------------------------------------+
+//       |                            FOOTER                         |
+//       |                           (16 x 2)                        |
+//       +-----------------------------------------------------------+
+
+        this.layout = {
+            /** @type {Rectangle} */
+            draft: {
+                x: x,
+                y: y,
+                width: 16 * unitWidth,
+                height: 2 * unitHeight
+            },
+            /** @type {Rectangle} */
+            grid: {
+                x: x + 3 * unitWidth,
+                y: y + 2 * unitHeight,
+                width: 10 * unitWidth,
+                height: 5 * unitHeight
+            },
+            /** @type {Rectangle} */
+            resources: {
+                x: x,
+                y: y + 2 * unitHeight,
+                width: 3 * unitWidth,
+                height: 5 * unitHeight
+            },
+            /** @type {Rectangle} */
+            movement: {
+                x: x + 13 * unitWidth,
+                y: y + 2 * unitHeight,
+                width: 3 * unitWidth,
+                height: 5 * unitHeight
+            },
+            /** @type {Rectangle} */
+            footer: {
+                x: x,
+                y: y + 7 * unitHeight,
+                width: 16 * unitWidth,
+                height: 2 * unitHeight
+            }
+        };
+    }
+
+    /**
+     *
+     * @param {string} [color = CLEAR_COLOR] the color to clear the canvas with
+     */
+    clearScreen(color = CLEAR_COLOR) {
+        this.context.fillStyle = color;
+        this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 }
 
@@ -1640,19 +1725,19 @@ const renderHallway = (hallway, midX, midY, r, direction) => {
     }
     const hallwayLength = Math.sqrt(3) * r / 2;
     const factor = options[hallway.status].factor;
-    context.fillStyle = options[hallway.status].color;
+    renderer.context.fillStyle = options[hallway.status].color;
 
 
-    context.lineWidth = getFontSizeInPixels("xs") / 2;
-    context.strokeStyle = "#69401E";
+    renderer.context.lineWidth = getFontSizeInPixels("xs") / 2;
+    renderer.context.strokeStyle = "#69401E";
 
     const drawRotatedRect = (x, y, width, height, angleRad) => {
-        context.save();
-        context.translate(x, y);
-        context.rotate(angleRad);
-        context.strokeRect(-width / 2, -height, width, height);
-        context.fillRect(-width / 2, -height, width, height);
-        context.restore();
+        renderer.context.save();
+        renderer.context.translate(x, y);
+        renderer.context.rotate(angleRad);
+        renderer.context.strokeRect(-width / 2, -height, width, height);
+        renderer.context.fillRect(-width / 2, -height, width, height);
+        renderer.context.restore();
     };
     drawRotatedRect(midX, midY, r / 5, hallwayLength * factor, DIRECTION_VALUES.indexOf(direction) * Math.PI / 3);
 };
@@ -1713,31 +1798,31 @@ const drawRefreshArrow = (centerX, centerY, radius = 50) => {
         const startAngle = refreshRotation + item.startAngle;
         const endAngle = refreshRotation + item.endAngle;
         // Draw arc
-        context.beginPath();
-        context.arc(centerX, centerY, radius, startAngle, endAngle);
-        context.strokeStyle = "white";
-        context.lineWidth = getFontSizeInPixels("xs") / 3;
-        context.stroke();
-        context.save();
+        renderer.context.beginPath();
+        renderer.context.arc(centerX, centerY, radius, startAngle, endAngle);
+        renderer.context.strokeStyle = "white";
+        renderer.context.lineWidth = getFontSizeInPixels("xs") / 3;
+        renderer.context.stroke();
+        renderer.context.save();
 
-        context.translate(centerX, centerY);
-        context.rotate(refreshRotation);
+        renderer.context.translate(centerX, centerY);
+        renderer.context.rotate(refreshRotation);
 
-        context.beginPath();
+        renderer.context.beginPath();
         const halfBase = length / 2;
         const height = Math.sqrt(3) / 2 * length;
 
         // Draw triangle relative to center
-        context.moveTo(item.sign * radius - halfBase, 0);
-        context.lineTo(item.sign * radius + halfBase, 0);
-        context.lineTo(item.sign * radius, item.sign * height);
+        renderer.context.moveTo(item.sign * radius - halfBase, 0);
+        renderer.context.lineTo(item.sign * radius + halfBase, 0);
+        renderer.context.lineTo(item.sign * radius, item.sign * height);
 
-        context.closePath();
+        renderer.context.closePath();
 
-        context.fillStyle = "white";
-        context.fill();
+        renderer.context.fillStyle = "white";
+        renderer.context.fill();
 
-        context.restore();
+        renderer.context.restore();
     }
 }
 
@@ -1753,21 +1838,21 @@ const drawKeyLabel = (label, centerX, centerY) => {
     const paddingX = fontSize / 3;
     const paddingY = fontSize / 5;
 
-    context.save();
-    context.font = `${fontSize}px monospace`;
-    const textWidth = context.measureText(label).width;
+    renderer.context.save();
+    renderer.context.font = `${fontSize}px monospace`;
+    const textWidth = renderer.context.measureText(label).width;
 
     const boxWidth = textWidth + paddingX * 2;
     const boxHeight = fontSize + paddingY * 2;
 
-    context.fillStyle = "#f0f0f0"; // key background
-    context.strokeStyle = "#333";  // border color
-    context.lineWidth = getFontSizeInPixels("xs") / 10;
-    context.fillRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
-    context.strokeRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
+    renderer.context.fillStyle = "#f0f0f0"; // key background
+    renderer.context.strokeStyle = "#333";  // border color
+    renderer.context.lineWidth = getFontSizeInPixels("xs") / 10;
+    renderer.context.fillRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
+    renderer.context.strokeRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
 
     renderer.drawText(label, centerX, centerY, "center", "middle", "#333", fontSize);
-    context.restore();
+    renderer.context.restore();
 }
 
 /**
@@ -1776,10 +1861,10 @@ const drawKeyLabel = (label, centerX, centerY) => {
  * @param {(width: number, height: number) => void} callback
  */
 const renderInLayout = (zone, callback) => {
-    context.save();
-    context.translate(zone.x, zone.y);
+    renderer.context.save();
+    renderer.context.translate(zone.x, zone.y);
     callback(zone.width, zone.height);
-    context.restore();
+    renderer.context.restore();
 }
 
 /**
@@ -1818,21 +1903,21 @@ const renderWavyLine = (startX, startY, endX, endY, periods, amplitude) => {
     const length = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx);
 
-    context.save();
-    context.translate(startX, startY);
-    context.rotate(angle);
-    context.beginPath();
-    context.lineWidth = getFontSizeInPixels("xs") / 5;
+    renderer.context.save();
+    renderer.context.translate(startX, startY);
+    renderer.context.rotate(angle);
+    renderer.context.beginPath();
+    renderer.context.lineWidth = getFontSizeInPixels("xs") / 5;
 
     for (let i = 0; i <= length; i++) {
         const waveY = Math.sin((i / length) * 2 * Math.PI * periods) * amplitude;
         const px = i;
         const py = waveY;
-        if (i === 0) context.moveTo(px, py);
-        else context.lineTo(px, py);
+        if (i === 0) renderer.context.moveTo(px, py);
+        else renderer.context.lineTo(px, py);
     }
-    context.stroke();
-    context.restore();
+    renderer.context.stroke();
+    renderer.context.restore();
 };
 
 /** @type {Map<string, PuzzlePiece>} */
@@ -1871,14 +1956,14 @@ const renderPuzzle = (cx, cy, r) => {
 
     const lineLength = r / 8;
     const spaceLength = r / 16;
-    context.lineCap = 'round';
+    renderer.context.lineCap = 'round';
     const symbols = Object.values(SymbolTexts);
     const altSymbols = Object.values(AltSymbolTexts);
 
     const coords = coordToString(gameState.player);
     const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
 
-    if (context !== null) {
+    if (renderer.context !== null) {
         renderHexTileImage(cx, cy, r, gameState.player, gameState.playerRoom.events["enter"]);
         return;
     }
@@ -1886,7 +1971,7 @@ const renderPuzzle = (cx, cy, r) => {
     // temporarily disabled without linter complaints
     renderHexagon(cx, cy, r, {fill: randomSymbols.fillColor, border: "white", borderWidth: 2});
 
-    context.setLineDash([lineLength, spaceLength]);
+    renderer.context.setLineDash([lineLength, spaceLength]);
     for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 180 * (60 * i + 30);
         const x = cx + 0.6 * r * Math.cos(angle);
@@ -1894,8 +1979,8 @@ const renderPuzzle = (cx, cy, r) => {
         renderer.drawText(`${randomSymbols.outerSymbol}`, x, y, "center", "middle", "white", "sm");
     }
 
-    context.setLineDash([]);
-    context.strokeStyle = "white";
+    renderer.context.setLineDash([]);
+    renderer.context.strokeStyle = "white";
     for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 180 * (60 * i);
 
@@ -1909,26 +1994,26 @@ const renderPuzzle = (cx, cy, r) => {
         } else {
             switch (randomSymbols.lineType) {
                 case "straight": {
-                    context.lineWidth = getFontSizeInPixels("xs") / 5;
-                    context.setLineDash([]);
+                    renderer.context.lineWidth = getFontSizeInPixels("xs") / 5;
+                    renderer.context.setLineDash([]);
                     break;
                 }
                 case "dotted": {
-                    context.setLineDash([r / 30]);
+                    renderer.context.setLineDash([r / 30]);
                     break;
                 }
                 case "dashed": {
-                    context.setLineDash([r / 5]);
+                    renderer.context.setLineDash([r / 5]);
                     break;
                 }
             }
-            context.beginPath();
-            context.moveTo(startX, startY);
-            context.lineTo(endX, endY);
-            context.stroke();
+            renderer.context.beginPath();
+            renderer.context.moveTo(startX, startY);
+            renderer.context.lineTo(endX, endY);
+            renderer.context.stroke();
         }
     }
-    context.setLineDash([]);
+    renderer.context.setLineDash([]);
     renderCircle(cx, cy, getFontSizeInPixels("xs"), {fill: "white"});
     //const symbol = symbols[4];
     renderer.drawText(`${randomSymbols.innerSymbol}`, cx, cy, "center", "middle", "white", "sm");
@@ -1959,12 +2044,12 @@ const HEX_TILE_OPTIONS = {
  * @param {RoomEvent} purpose
  */
 const renderHexTileImage = (cx, cy, r, coord, purpose) => {
-    const tx = renderer.spriteWidth / 2;
-    const ty = renderer.spriteHeight - tx;
+    const tx = renderer.spriteDimensions.width / 2;
+    const ty = renderer.spriteDimensions.height - tx;
 
     const targetWidth = 2 * r;
-    const scale = Math.round(targetWidth / renderer.spriteWidth * 100) / 100;
-    const targetHeight = renderer.spriteHeight * scale;
+    const scale = Math.round(targetWidth / renderer.spriteDimensions.width * 100) / 100;
+    const targetHeight = renderer.spriteDimensions.height * scale;
 
     const dx = cx - tx * scale;
     const dy = cy - ty * scale;
@@ -1986,12 +2071,12 @@ const renderHexTileImage = (cx, cy, r, coord, purpose) => {
         HEX_TILE_CACHE.set(coordStr, randomTile);
     }
 
-    context.drawImage(
+    renderer.context.drawImage(
         renderer.spriteSheet,
-        spriteCol * renderer.spriteWidth,
-        spriteRow * renderer.spriteHeight + 1,
-        renderer.spriteWidth,
-        renderer.spriteHeight,
+        spriteCol * renderer.spriteDimensions.width,
+        spriteRow * renderer.spriteDimensions.height + 1,
+        renderer.spriteDimensions.width,
+        renderer.spriteDimensions.height,
         dx,
         dy,
         targetWidth,
@@ -2015,26 +2100,23 @@ const renderResources = (width, height) => {
         renderer.drawText(text, width / 2.5, (idx + 1) * getFontSizeInPixels("lg"), "left", "top", "white", "sm");
     });
 
-    const unitWidth = width / 2;
-    const unitHeight = height / 5;
+    const {width: unitWidth, height: unitHeight} = renderer.unitDimensions;
 
-    const cx = unitWidth;
+    const cx = 1.5 * unitWidth;
     const cy = 3 * unitHeight;
-    const r = unitWidth * 0.5;
+    const r = unitWidth * 0.75;
     renderPuzzle(cx, cy, r);
 };
 
 /**
  *
- * @param {number} width
- * @param {number} height
  */
-const renderHexGrid = (width, height) => {
-    context.strokeStyle = "#CECECE";
-    context.lineWidth = getFontSizeInPixels("xs") / 5;
+const renderHexGrid = () => {
+    renderer.context.strokeStyle = "#CECECE";
+    renderer.context.lineWidth = getFontSizeInPixels("xs") / 5;
     const cols = gameState.cols;
     const rows = gameState.rows;
-    const unitWidth = width / 10;
+    const {width: unitWidth} = renderer.unitDimensions;
     const r = unitWidth / 2;
 
     const spacing = 1;
@@ -2067,19 +2149,19 @@ const renderHexGrid = (width, height) => {
                 }
 
                 if (gameState.getState() === "move" && gameState.canPlayerDraftTowards(getDirection(gameState.player, currentCoord))) {
-                    context.save();
-                    context.globalAlpha = selectionAlpha;
+                    renderer.context.save();
+                    renderer.context.globalAlpha = selectionAlpha;
                     renderHexagon(spacing * cx, spacing * cy, 0.75 * r, {fill: ROOM_COLORS.draft});
-                    context.restore();
+                    renderer.context.restore();
                 }
             }
 
             if (gameState.getState() === "draft" && row === gameState.draft.position.row && col === gameState.draft.position.col) {
-                context.save();
-                context.fillStyle = ROOM_COLORS.draft;
-                context.globalAlpha = selectionAlpha;
+                renderer.context.save();
+                renderer.context.fillStyle = ROOM_COLORS.draft;
+                renderer.context.globalAlpha = selectionAlpha;
                 renderHexRoom(spacing * cx, spacing * cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
-                context.restore();
+                renderer.context.restore();
             }
         }
     }
@@ -2103,7 +2185,7 @@ const mouseToGrid = (mouseX, mouseY) => {
              * @type {Coord}
              */
             const coord = {row: row, col: col};
-            if (context.isPointInPath(HEX_GRID_PATHS.get(coordToString(coord)), mouseX, mouseY)) {
+            if (renderer.context.isPointInPath(HEX_GRID_PATHS.get(coordToString(coord)), mouseX, mouseY)) {
                 return coord;
             }
         }
@@ -2135,22 +2217,22 @@ const renderHexagon = (cx, cy, r, colors, highlight = undefined, orientation = "
               width
      */
     const extraRotation = orientation === "flat" ? 0 : 30;
-    context.save();
-    context.beginPath();
+    renderer.context.save();
+    renderer.context.beginPath();
     for (let i = 0; i < 6; i++) {
         const angle = Math.PI / 180 * (60 * i + extraRotation);
         const x = cx + r * Math.cos(angle);
         const y = cy + r * Math.sin(angle);
-        if (i === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
+        if (i === 0) renderer.context.moveTo(x, y);
+        else renderer.context.lineTo(x, y);
     }
-    context.closePath();
+    renderer.context.closePath();
     if (highlight) {
         useColors(highlight);
     } else if (colors) {
         useColors(colors);
     }
-    context.restore();
+    renderer.context.restore();
 };
 
 /**
@@ -2160,24 +2242,22 @@ const renderHexagon = (cx, cy, r, colors, highlight = undefined, orientation = "
  * @param {{fill?: string, border?: string, borderWidth?: number}} colors
  */
 const renderCircle = (cx, cy, r, colors) => {
-    context.save();
-    context.beginPath();
-    context.arc(cx, cy, r, 0, Math.PI * 2);
-    context.closePath();
+    renderer.context.save();
+    renderer.context.beginPath();
+    renderer.context.arc(cx, cy, r, 0, Math.PI * 2);
+    renderer.context.closePath();
     useColors(colors);
-    context.restore();
+    renderer.context.restore();
 };
 
 /**
  *
- * @param {number} width
- * @param {number} height
  */
-const renderHexDraft = (width, height) => {
+const renderHexDraft = () => {
     if (gameState.getState() !== "draft") return;
     const row = 0.5;
-    const unitWidth = width / 16;
-    const unitHeight = height / 2;
+
+    const {width: unitWidth, height: unitHeight} = renderer.unitDimensions;
 
     for (let idx = 0; idx < gameState.draft.options.length; ++idx) {
         const col = (3 * idx + 4.5);
@@ -2207,10 +2287,10 @@ const renderHexDraft = (width, height) => {
             }
 
             const closedRoom = draftedRoom.needsKey && gameState.getResource("keys") === 0;
-            context.save();
-            context.globalAlpha = selectionAlpha;
+            renderer.context.save();
+            renderer.context.globalAlpha = selectionAlpha;
             renderHexagon(cx, cy, 1.2 * r, {border: closedRoom ? "red" : "yellow", borderWidth: 6});
-            context.restore();
+            renderer.context.restore();
         }
     }
 
@@ -2218,7 +2298,7 @@ const renderHexDraft = (width, height) => {
         const arrowX = (14.5 * unitWidth);
         const arrowY = unitHeight;
         drawRefreshArrow(arrowX, arrowY, unitHeight / 3);
-        context.font = `${getFontSizeInPixels("sm")}px monospace`;
+        renderer.context.font = `${getFontSizeInPixels("sm")}px monospace`;
         renderer.drawText(`2\u00d7${ItemTexts.gems}`, 14.5 * unitWidth, unitHeight, "center", "middle", "white", "sm");
         renderer.drawText("[R]", 14.5 * unitWidth, 1.75 * unitHeight, "center", "middle", "white", "sm");
     }
@@ -2241,31 +2321,6 @@ const renderHints = (width, height) => {
     });
 };
 
-/**
- *
- * @return {Rectangle} the bounding rectangle for the render part
- */
-const getPlayArea = () => {
-    const aspectRatio = 16 / 9;
-    const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
-
-    const canvasAspect = canvasWidth / canvasHeight;
-
-    if (canvasAspect > aspectRatio) {
-        const height = canvasHeight;
-        const width = height * aspectRatio;
-        const x = (canvasWidth - width) / 2;
-        const y = 0;
-        return {x, y, width, height};
-    } else {
-        const width = canvasWidth;
-        const height = width / aspectRatio;
-        const x = 0;
-        const y = (canvasHeight - height) / 2;
-        return {x, y, width, height};
-    }
-};
 
 /**
  * Precalculated map of paths, used to check mouse position against the hexes.
@@ -2276,64 +2331,9 @@ const HEX_GRID_PATHS = new Map();
 
 const render = () => {
     if (RENDER_AREA_HAS_BEEN_RESIZED) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        context.imageSmoothingEnabled = false;
-
-        const playArea = getPlayArea();
-        renderer.playArea = playArea;
-
-        const {x, y, width, height} = playArea;
-        const unitWidth = width / 16;
-        const unitHeight = height / 9;
-
-        /** @type {Record<string, Rectangle>} */
-        const layout = {
-            /** @type {Rectangle} */
-            draft: {
-                x: x,
-                y: y,
-                width: width,
-                height: unitHeight * 2
-            },
-            /** @type {Rectangle} */
-            grid: {
-                x: x + unitWidth * 3,
-                y: y + unitHeight * 2,
-                width: unitWidth * 10,
-                height: unitHeight * 5
-            },
-            /** @type {Rectangle} */
-            resources: {
-                x: x,
-                y: y + unitHeight * 2,
-                width: unitWidth * 3,
-                height: unitHeight * 5
-            },
-            /** @type {Rectangle} */
-            movement: {
-                x: x + unitWidth * 13,
-                y: y + unitHeight * 2,
-                width: unitWidth * 3,
-                height: unitHeight * 5
-            },
-            /** @type {Rectangle} */
-            footer: {
-                x: x,
-                y: y + unitHeight * 7,
-                width: width,
-                height: unitHeight * 2
-            }
-        };
-
-        renderer.layout = layout;
-        renderer.unitWidth = unitWidth;
-        renderer.unitHeight = unitHeight;
-        renderer.canvasWidth = canvas.width;
-        renderer.canvasHeight = canvas.height;
+        renderer.recalculatePlayArea();
     }
-    context.fillStyle = CLEAR_COLOR;
-    context.fillRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
+    renderer.clearScreen();
 
     /** @type {Record<string, Rectangle>} */
     const layout = renderer.layout;
@@ -2341,11 +2341,11 @@ const render = () => {
     const rows = gameState.rows;
     const cols = gameState.cols;
 
-    const tileSize = Math.min(128, Math.floor(Math.min(canvas.width / cols, canvas.height / rows)));
+    const tileSize = Math.min(128, Math.floor(Math.min(renderer.canvas.width / cols, renderer.canvas.height / rows)));
 
 
-    const offsetX = Math.floor((canvas.width - tileSize * cols) / 2);
-    const offsetY = Math.floor((canvas.height - tileSize * rows) / 2);
+    const offsetX = Math.floor((renderer.canvas.width - tileSize * cols) / 2);
+    const offsetY = Math.floor((renderer.canvas.height - tileSize * rows) / 2);
 
     renderInLayout(layout.draft, renderHexDraft);
     renderInLayout(layout.resources, renderResources);
@@ -2354,11 +2354,11 @@ const render = () => {
     renderInLayout(layout.footer, renderHints);
 
     if (DEBUG_MODE) {
-        context.strokeStyle = CSS_COLOR_NAMES.Pink;
-        context.lineWidth = getFontSizeInPixels("xs") / 5;
+        renderer.context.strokeStyle = CSS_COLOR_NAMES.Pink;
+        renderer.context.lineWidth = getFontSizeInPixels("xs") / 5;
 
         for (const [name, rect] of Object.entries(layout)) {
-            context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+            renderer.context.strokeRect(rect.x, rect.y, rect.width, rect.height);
             renderer.drawText(`[${name}]`, rect.x + 5, rect.y + 5, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
         }
     }
@@ -2368,7 +2368,7 @@ const render = () => {
     }
     if (RENDER_AREA_HAS_BEEN_RESIZED) {
         HEX_GRID_PATHS.clear();
-        const r = renderer.unitWidth / 2;
+        const r = renderer.unitDimensions.width / 2;
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
                 const hexHeight = Math.sqrt(3) * r;
@@ -2417,14 +2417,14 @@ const handleMouseMove = (event) => {
     gameState.mouseGridCol = mouseCoord.col;
     if (gameState.getState() === "move" && gameState.validCoord(mouseCoord)) {
         if (gameState.canPlayerDraftTowards(getDirection(gameState.player, mouseCoord))) {
-            canvas.style.cursor = "pointer";
+            renderer.canvas.style.cursor = "pointer";
         } else if (areNeighbors(gameState.player, mouseCoord) && gameState.atCoord(mouseCoord).revealed) {
-            canvas.style.cursor = "pointer";
+            renderer.canvas.style.cursor = "pointer";
         } else {
-            canvas.style.cursor = "default";
+            renderer.canvas.style.cursor = "default";
         }
     } else {
-        canvas.style.cursor = "default";
+        renderer.canvas.style.cursor = "default";
     }
 };
 
@@ -2595,7 +2595,7 @@ const gameLoop = (timestamp) => {
     gameState.lastTimeStamp = timestamp;
     update(timestamp);
     if (!render()) {
-        renderer.drawText("Play area not suitable for this game, buy a proper display.", canvas.width / 2, canvas.height / 2, "center", "middle", CSS_COLOR_NAMES.Red, "sm");
+        renderer.drawText("Play area not suitable for this game, buy a proper display.", renderer.canvas.width / 2, renderer.canvas.height / 2, "center", "middle", CSS_COLOR_NAMES.Red, "sm");
     } else {
         renderer.drawText(`FPS: ${Math.round(fps)}`, renderer.layout.draft.x, renderer.layout.draft.y, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
 
@@ -2608,17 +2608,17 @@ const gameLoop = (timestamp) => {
             width: rectSize,
             height: rectSize,
         };
-        context.fillStyle = renderer.useSprites ? CSS_COLOR_NAMES.Wheat : CSS_COLOR_NAMES.MediumVioletRed;
-        context.fillRect(rect.x, rect.y, rect.width, rect.height);
+        renderer.context.fillStyle = renderer.useSprites ? CSS_COLOR_NAMES.Wheat : CSS_COLOR_NAMES.MediumVioletRed;
+        renderer.context.fillRect(rect.x, rect.y, rect.width, rect.height);
         if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
-            canvas.style.cursor = 'pointer';
+            renderer.canvas.style.cursor = 'pointer';
         }
         // TODO
         // rect.x -= 2 * rectSize;
-        // context.textBaseline = 'hanging';
+        // renderer.context.textBaseline = 'hanging';
         // renderer.drawText("❓", rect.x, rect.y, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
         // if (isInside(renderer.mousePosition.x, renderer.mousePosition.y, rect)) {
-        //     canvas.style.cursor = 'pointer';
+        //     renderer.canvas.style.cursor = 'pointer';
         // }
     }
     requestAnimationFrame(gameLoop);
