@@ -73,10 +73,20 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
 /**
  * Represents the current state of the mouse.
  * @typedef {Object} MouseState
- * @property {number} x - The current mouse X position (relative to renderer.canvas).
+ * @property {number} x - The current mouse X position (relative to canvas).
  * @property {number} y - The current mouse Y position.
  * @property {Set<number>} buttons - A set of pressed mouse button codes (0 = left, 1 = middle, 2 = right).
  */
+/**
+ * Represents a sprite sheet (texture atlas).
+ *
+ * @typedef {Object} SpriteSheet
+ * @property {string} url   - URL or path to the sprite sheet image.
+ * @property {Dimension} size - Total width and height of the sprite sheet in pixels.
+ * @property {Coord} dimension  - Number of rows and cols in the sprite sheet.
+ * @property {HTMLImageElement | undefined} image - The loaded image element.
+ */
+
 
 /**
  * Events related to room activities
@@ -1422,8 +1432,6 @@ const updatePlayerPosition = (direction) => {
             at(newPosition).enter();
             gameState.movePlayerToCoord(newPosition);
             gameState.removeResource("steps");
-            // TODO move it from here
-            renderer.nextSprite();
         }
     }
 }
@@ -1487,22 +1495,9 @@ class Renderer {
      */
     playArea;
 
-    /** @type {HTMLImageElement} */
-    spriteSheet;
-
-    // 512 x 854
-    // 342 px of "space" above
-    // spriteWidth = 512;
-    // spriteHeight = 854;
-
-    /** @type {Dimension} */
-    spriteDimensions = {width: 32, height: 48};
-
-    renderedSpriteRow = 0;
-    renderedSpriteCol = 0;
-
-    maxSpriteRow = 5;
-    maxSpriteCol = 8;
+    // would be nice if they would be in one image to avoid loading time, but currently not feasible
+    /** @type {Record<string, SpriteSheet>} */
+    #spriteSheets;
 
     useSprites = false;
     displayHallways = true;
@@ -1527,12 +1522,39 @@ class Renderer {
         this.mousePosition = {x: -1, y: -1};
     }
 
-    nextSprite() {
-        const spriteCount = this.maxSpriteRow * this.maxSpriteCol;
-        const index = (this.renderedSpriteRow * this.maxSpriteCol + this.renderedSpriteCol + 1) % spriteCount;
+    /**
+     *  @param {Record<string, SpriteSheet>} spriteSheets
+     *  @return Promise
+     *  */
+    loadSpriteSheets(spriteSheets) {
+        this.spriteSheets = spriteSheets;
 
-        this.renderedSpriteRow = Math.floor(index / this.maxSpriteCol);
-        this.renderedSpriteCol = index % this.maxSpriteCol;
+        /** @type {Promise[]} */
+        const promises = Object.values(this.spriteSheets).map(spriteSheet => {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onerror = (err) => reject(err);
+                img.onload = () => {
+                    spriteSheet.image = img;
+                    resolve();
+                };
+                img.src = spriteSheet.url;
+            });
+        });
+
+        return Promise.all(promises);
+    }
+
+    /**
+     *
+     * @param name
+     * @return {SpriteSheet}
+     */
+    getSprite(name) {
+        if (!name in this.spriteSheets) {
+            throw new Error(`Undefined spritesheet name '${name}'. Possible values: ${Object.keys(this.spriteSheets).map(name => name).join(', ')}`);
+        }
+        return this.spriteSheets[name];
     }
 
     isReady() {
@@ -2044,12 +2066,17 @@ const HEX_TILE_OPTIONS = {
  * @param {RoomEvent} purpose
  */
 const renderHexTileImage = (cx, cy, r, coord, purpose) => {
-    const tx = renderer.spriteDimensions.width / 2;
-    const ty = renderer.spriteDimensions.height - tx;
+    /** @type {SpriteSheet} */
+    const hexSprite = renderer.getSprite("tiles");
+    const spriteWidth = hexSprite.size.width;
+
+    const spriteHeight = hexSprite.size.height;
+    const tx = spriteWidth / 2;
+    const ty = spriteHeight - tx;
 
     const targetWidth = 2 * r;
-    const scale = Math.round(targetWidth / renderer.spriteDimensions.width * 100) / 100;
-    const targetHeight = renderer.spriteDimensions.height * scale;
+    const scale = Math.round(targetWidth / spriteWidth * 100) / 100;
+    const targetHeight = spriteHeight * scale;
 
     const dx = cx - tx * scale;
     const dy = cy - ty * scale;
@@ -2072,11 +2099,11 @@ const renderHexTileImage = (cx, cy, r, coord, purpose) => {
     }
 
     renderer.context.drawImage(
-        renderer.spriteSheet,
-        spriteCol * renderer.spriteDimensions.width,
-        spriteRow * renderer.spriteDimensions.height + 1,
-        renderer.spriteDimensions.width,
-        renderer.spriteDimensions.height,
+        hexSprite.image,
+        spriteCol * spriteWidth,
+        spriteRow * spriteHeight + 1,
+        spriteWidth,
+        spriteHeight,
         dx,
         dy,
         targetWidth,
@@ -2781,11 +2808,20 @@ const setup = () => {
 
 const run = async () => {
     setup();
-    renderer.spriteSheet = new Image();
-    renderer.spriteSheet.src = "./hextiles.png";
-    renderer.spriteSheet.onload = () => {
-        gameLoop(0);
-    };
+    return renderer.loadSpriteSheets({
+        "tiles": {
+            url: "./hextiles.png",
+            dimension: {
+                row: 5,
+                col: 8,
+            },
+            size: {
+                width: 32,
+                height: 48
+            },
+            image: undefined
+        }
+    }).then(() => gameLoop(0));
 };
 
 run().then(() => console.log("Game started."));
