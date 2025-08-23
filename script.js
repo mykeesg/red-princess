@@ -12,10 +12,10 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
  */
 
 /**
- * Represents a two-dimensional size measurement.
+ * Represents a two-dimensional tileSize measurement.
  * @typedef {Object} Dimension
- * @property {number} width - The horizontal size in units (e.g., pixels, tiles).
- * @property {number} height - The vertical size in units (e.g., pixels, tiles).
+ * @property {number} width - The horizontal tileSize in units (e.g., pixels, tiles).
+ * @property {number} height - The vertical tileSize in units (e.g., pixels, tiles).
  */
 
 /**
@@ -82,7 +82,7 @@ let RENDER_AREA_HAS_BEEN_RESIZED = true;
  *
  * @typedef {Object} SpriteSheet
  * @property {string} url   - URL or path to the sprite sheet image.
- * @property {Dimension} size - Total width and height of the sprite sheet in pixels.
+ * @property {Dimension} tileSize - Total width and height of the sprite sheet in pixels.
  * @property {Coord} dimension  - Number of rows and cols in the sprite sheet.
  * @property {HTMLImageElement | undefined} image - The loaded image element.
  */
@@ -785,6 +785,7 @@ const ROOM_COLORS = {
 
 const PLAYER_COLOR = CSS_COLOR_NAMES.Black;
 const CLEAR_COLOR = "#1D1D1D";
+//const CLEAR_COLOR = CSS_COLOR_NAMES.RoyalBlue;
 
 class Game {
     /**
@@ -1495,6 +1496,11 @@ class Renderer {
      */
     playArea;
 
+    /**
+     * @type {number}
+     */
+    gridSpacing = 1;
+
     // would be nice if they would be in one image to avoid loading time, but currently not feasible
     /** @type {Record<string, SpriteSheet>} */
     #spriteSheets;
@@ -1530,7 +1536,8 @@ class Renderer {
         this.spriteSheets = spriteSheets;
 
         /** @type {Promise[]} */
-        const promises = Object.values(this.spriteSheets).map(spriteSheet => {
+        const promises = Object.entries(this.spriteSheets).map(([name, /**@type {SpriteSheet} */spriteSheet]) => {
+            console.debug(`Loading sprite ${name} from URL ${spriteSheet.url}`);
             return new Promise((resolve, reject) => {
                 const img = new Image();
                 img.onerror = (err) => reject(err);
@@ -1577,6 +1584,60 @@ class Renderer {
         renderer.context.fillStyle = color;
         renderer.context.font = `${getFontSizeInPixels(size)}px monospace`;
         renderer.context.fillText(text, x, y);
+    }
+
+    /**
+     * Draws a specific tile from a sprite sheet at the given position,
+     * aligned according to the provided horizontal and vertical settings.
+     *
+     * @param {string} sprite - The key of the sprite sheet to draw from.
+     * @param {number} x - The x-coordinate on the canvas where the sprite will be drawn.
+     * @param {number} y - The y-coordinate on the canvas where the sprite will be drawn.
+     * @param {HorizontalAlignment} hAlign - Horizontal alignment of the sprite (e.g., left, center, right).
+     * @param {VerticalAlignment} vAlign - Vertical alignment of the sprite (e.g., top, middle, bottom).
+     * @param {Coord} [coord] - The row and column within the sprite sheet to draw from.
+     * @param {number} [scale] - Optional scale applied to the sprite when drawing.
+     */
+    drawTile(sprite, x, y, hAlign, vAlign, coord = undefined, scale = undefined) {
+        const spritesheet = this.getSprite(sprite);
+        if (!coord) {
+            coord = {row: 0, col: 0};
+        }
+
+        const tileWidth = spritesheet.tileSize.width;
+        const tileHeight = spritesheet.tileSize.height;
+
+        //TODO :: does not scale with canvas resize, needs to be looked into
+        scale = scale ?? 1;
+
+        const targetWidth = scale * tileWidth;
+        const targetHeight = scale * tileHeight;
+
+        let px = x;
+        let py = y;
+        if (hAlign === "center") {
+            px -= targetWidth / 2;
+        } else if (hAlign === "right") {
+            px -= targetWidth;
+        }
+
+        if (vAlign === "middle") {
+            py -= targetHeight / 2;
+        } else if (hAlign === "bottom") {
+            py -= targetHeight;
+        }
+
+        this.context.drawImage(
+            spritesheet.image,
+            coord.col * tileWidth,
+            coord.row * tileHeight,
+            tileWidth,
+            tileHeight,
+            px,
+            py,
+            targetWidth,
+            targetHeight
+        );
     }
 
     recalculatePlayArea() {
@@ -1985,7 +2046,7 @@ const renderPuzzle = (cx, cy, r) => {
     const coords = coordToString(gameState.player);
     const randomSymbols = calculateIfAbsent(coords, symbols, altSymbols);
 
-    if (renderer.context !== null) {
+    if (r !== null) {
         renderHexTileImage(cx, cy, r, gameState.player, gameState.playerRoom.events["enter"]);
         return;
     }
@@ -2068,15 +2129,14 @@ const HEX_TILE_OPTIONS = {
 const renderHexTileImage = (cx, cy, r, coord, purpose) => {
     /** @type {SpriteSheet} */
     const hexSprite = renderer.getSprite("tiles");
-    const spriteWidth = hexSprite.size.width;
-
-    const spriteHeight = hexSprite.size.height;
-    const tx = spriteWidth / 2;
-    const ty = spriteHeight - tx;
+    const tileWidth = hexSprite.tileSize.width;
+    const tileHeight = hexSprite.tileSize.height;
+    const tx = tileWidth / 2;
+    const ty = tileHeight - tx;
 
     const targetWidth = 2 * r;
-    const scale = Math.round(targetWidth / spriteWidth * 100) / 100;
-    const targetHeight = spriteHeight * scale;
+    const scale = Math.round(targetWidth / tileWidth * 100) / 100;
+    const targetHeight = tileHeight * scale;
 
     const dx = cx - tx * scale;
     const dy = cy - ty * scale;
@@ -2100,10 +2160,10 @@ const renderHexTileImage = (cx, cy, r, coord, purpose) => {
 
     renderer.context.drawImage(
         hexSprite.image,
-        spriteCol * spriteWidth,
-        spriteRow * spriteHeight + 1,
-        spriteWidth,
-        spriteHeight,
+        spriteCol * tileWidth,
+        spriteRow * tileHeight + 1,
+        tileWidth,
+        tileHeight,
         dx,
         dy,
         targetWidth,
@@ -2126,13 +2186,31 @@ const renderResources = (width, height) => {
     texts.forEach((text, idx) => {
         renderer.drawText(text, width / 2.5, (idx + 1) * getFontSizeInPixels("lg"), "left", "top", "white", "sm");
     });
+    //compiler-safe early return, no bridges for now
+    if (height > -1) {
+        return;
+    }
 
+    // BRIDGE
     const {width: unitWidth, height: unitHeight} = renderer.unitDimensions;
 
-    const cx = 1.5 * unitWidth;
-    const cy = 3 * unitHeight;
-    const r = unitWidth * 0.75;
-    renderPuzzle(cx, cy, r);
+    {
+        const cx = 1.5 * unitWidth;
+        const cy = 3 * unitHeight;
+        const r = unitWidth;
+        renderPuzzle(cx, cy, r);
+    }
+    {
+        const cx = 1.5 * unitWidth;
+        const cy = 5 * unitHeight;
+        const r = unitWidth;
+        renderPuzzle(cx, cy, r);
+    }
+
+    const tx = 1.5 * unitWidth;
+    const ty = 4 * unitHeight;
+
+    renderer.drawTile("bridge", tx, ty, "center", "middle", {row: 0, col: 0}, 0.5);
 };
 
 /**
@@ -2146,7 +2224,7 @@ const renderHexGrid = () => {
     const {width: unitWidth} = renderer.unitDimensions;
     const r = unitWidth / 2;
 
-    const spacing = 1;
+    const spacing = renderer.gridSpacing;
 
     for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
@@ -2189,6 +2267,36 @@ const renderHexGrid = () => {
                 renderer.context.globalAlpha = selectionAlpha;
                 renderHexRoom(spacing * cx, spacing * cy, 0.75 * r, gameState.draft.options[gameState.draft.index]);
                 renderer.context.restore();
+            }
+        }
+    }
+
+    // early return, don't need bridges now
+    if (spacing !== 0) {
+        return;
+    }
+
+    // BRIDGE
+
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            const hexHeight = Math.sqrt(3) * r;
+            const rowOffset = hexHeight / 2;
+            const cx = (1.5 * col + 1) * r;
+            //Shift items in even columns 1 unit down. Center is offset as well.
+            const offsetY = ((col % 2) + 1) * rowOffset;
+            const cy = (row * hexHeight) + offsetY;
+            if (gameState.isRevealed(row, col)) {
+                // check row below
+                const southern = tileTowards({row: row, col: col}, "SOUTH");
+                if (gameState.validCoord(southern) && gameState.isRevealedCoord(southern)) {
+                    const midX = cx;
+                    const midY = cy + ((((row + 1) * hexHeight) + offsetY) - cy) / 2;
+                    renderer.drawTile("bridge", spacing * midX, spacing * midY, "center", "middle", {
+                        row: 0,
+                        col: 0
+                    }, 0.25);
+                }
             }
         }
     }
@@ -2386,7 +2494,8 @@ const render = () => {
 
         for (const [name, rect] of Object.entries(layout)) {
             renderer.context.strokeRect(rect.x, rect.y, rect.width, rect.height);
-            renderer.drawText(`[${name}]`, rect.x + 5, rect.y + 5, "left", "top", CSS_COLOR_NAMES.Pink, "sm");
+            renderer.drawText(`[${name}] :: ${JSON.stringify(rect, (key, val) => val.toFixed ? Number(val.toFixed(2)) : val)}`,
+                rect.x + 5, rect.y + 5, "left", "top", CSS_COLOR_NAMES.Pink, "xs");
         }
     }
 
@@ -2395,15 +2504,16 @@ const render = () => {
     }
     if (RENDER_AREA_HAS_BEEN_RESIZED) {
         HEX_GRID_PATHS.clear();
+        const spacing = renderer.gridSpacing;
         const r = renderer.unitDimensions.width / 2;
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
                 const hexHeight = Math.sqrt(3) * r;
                 const rowOffset = hexHeight / 2;
-                const cx = (1.5 * col + 1) * r;
+                const cx = spacing * (1.5 * col + 1) * r;
                 //Shift items in even columns 1 unit down. Center is offset as well.
                 const offsetY = ((col % 2) + 1) * rowOffset;
-                const cy = (row * hexHeight) + offsetY;
+                const cy = spacing * (row * hexHeight) + offsetY;
 
                 const path = new Path2D();
                 for (let i = 0; i < 6; i++) {
@@ -2815,11 +2925,22 @@ const run = async () => {
                 row: 5,
                 col: 8,
             },
-            size: {
+            tileSize: {
                 width: 32,
                 height: 48
             },
             image: undefined
+        },
+        bridge: {
+            url: "./bridge.png",
+            dimension: {
+                row: 1,
+                col: 1,
+            },
+            tileSize: {
+                width: 256,
+                height: 256,
+            }
         }
     }).then(() => gameLoop(0));
 };
